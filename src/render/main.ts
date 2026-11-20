@@ -3,7 +3,22 @@ import { DT, FUEL_MAX_60, LOW_FUEL_THRESHOLD_60, TICK_RATE, TUNING } from '../co
 import { BELL_TOWER_RADIUS, NIGHT_MAPS } from '../core/maps';
 import { createDefaultInputState, distXZ, GameSimulation } from '../core/simulation';
 import type { EventRecord, InputState, NightId } from '../core/types';
+import {
+  ACTION_LABELS,
+  type ActionKey,
+  DEFAULT_KEYBINDS,
+  fetchLeaderboard,
+  findKeyConflict,
+  formatKeyCode,
+  formatLocalIsoTimestamp,
+  type KeyBindings,
+  loadKeyBindings,
+  saveKeyBindings,
+  submitLeaderboardEntry,
+  validatePlayerName,
+} from './accessibility';
 import { SoundEngine } from './audio';
+import { runBenchmarkMode } from './bench';
 import {
   createBambooHatTexture,
   createGlowSpriteTexture,
@@ -87,10 +102,19 @@ class DaoDenLongApp {
 
   private currentNight: NightId = 1;
   private campaignTotalScore = 0;
+  private nightsWonCount = 0;
   private screenMode: ScreenMode = 'menu';
   private settingsReturnTo: ScreenMode = 'menu';
   private mouseSensitivity = 0.35;
   private colorblindMode = false;
+  private reducedMotion = false;
+  private largeText = false;
+  private keybinds: KeyBindings = loadKeyBindings();
+  private listeningAction: ActionKey | null = null;
+  private recentShadePos: THREE.Vector3 | null = null;
+  private recentShadeTimer = 0;
+  private captions: Array<{ text: string; ttl: number }> = [];
+  private lowFuelWarned = new Set<string>();
 
   private playerGroup!: THREE.Group;
   private playerBodyGroup!: THREE.Group;
@@ -151,11 +175,15 @@ class DaoDenLongApp {
   private moteSlots: HTMLDivElement[] = [];
   private currentBarCapacity = 0;
   private skillDashBox = document.getElementById('skill-dash')!;
+  private hudDashKey = document.getElementById('hud-dash-key')!;
   private hudDashCd = document.getElementById('hud-dash-cd')!;
   private skillPulseBox = document.getElementById('skill-pulse')!;
+  private hudPulseKey = document.getElementById('hud-pulse-key')!;
   private hudPulseCd = document.getElementById('hud-pulse-cd')!;
   private promptBanner = document.getElementById('prompt-banner')!;
+  private captionFeed = document.getElementById('caption-feed')!;
   private lanternArrow = document.getElementById('lantern-arrow')!;
+  private shadeArrow = document.getElementById('shade-arrow')!;
 
   private menuScreen = document.getElementById('menu-screen')!;
   private introScreen = document.getElementById('intro-screen')!;
@@ -163,17 +191,27 @@ class DaoDenLongApp {
   private introQuote = document.getElementById('intro-quote')!;
   private pauseScreen = document.getElementById('pause-screen')!;
   private settingsScreen = document.getElementById('settings-screen')!;
+  private leaderboardScreen = document.getElementById('leaderboard-screen')!;
+  private lbTbody = document.getElementById('lb-tbody')!;
   private resultScreen = document.getElementById('result-screen')!;
   private resultTitle = document.getElementById('result-title')!;
   private resultDesc = document.getElementById('result-desc')!;
   private resultScore = document.getElementById('result-score')!;
   private btnResultNext = document.getElementById('btn-result-next') as HTMLButtonElement;
+  private saveScoreBox = document.getElementById('save-score-box')!;
+  private inputPlayerName = document.getElementById('input-player-name') as HTMLInputElement;
+  private btnSaveScore = document.getElementById('btn-save-score') as HTMLButtonElement;
+  private saveScoreMsg = document.getElementById('save-score-msg')!;
 
   private sliderVolume = document.getElementById('slider-volume') as HTMLInputElement;
   private valVolume = document.getElementById('val-volume')!;
   private sliderSens = document.getElementById('slider-sens') as HTMLInputElement;
   private valSens = document.getElementById('val-sens')!;
   private toggleColorblind = document.getElementById('toggle-colorblind') as HTMLInputElement;
+  private toggleReducedMotion = document.getElementById('toggle-reduced-motion') as HTMLInputElement;
+  private toggleLargeText = document.getElementById('toggle-large-text') as HTMLInputElement;
+  private keybindGrid = document.getElementById('keybind-grid')!;
+  private keybindError = document.getElementById('keybind-error')!;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -242,15 +280,84 @@ class DaoDenLongApp {
       const s = Number.parseFloat(savedSens);
       if (Number.isFinite(s)) this.mouseSensitivity = Math.max(0.1, Math.min(1.0, s));
     }
-    const savedCb = window.localStorage.getItem('ddl_colorblind');
-    this.colorblindMode = savedCb === 'true';
+    this.colorblindMode = window.localStorage.getItem('ddl_colorblind') === 'true';
+    this.reducedMotion = window.localStorage.getItem('ddl_reduced_motion') === 'true';
+    this.largeText = window.localStorage.getItem('ddl_large_text') === 'true';
+
     document.body.classList.toggle('colorblind', this.colorblindMode);
+    document.body.classList.toggle('reduced-motion', this.reducedMotion);
+    document.body.classList.toggle('large-text', this.largeText);
+
     this.toggleColorblind.checked = this.colorblindMode;
+    this.toggleReducedMotion.checked = this.reducedMotion;
+    this.toggleLargeText.checked = this.largeText;
 
     this.sliderVolume.value = String(Math.round(this.sound.volume * 100));
     this.valVolume.textContent = `${this.sliderVolume.value}%`;
     this.sliderSens.value = String(Math.round(this.mouseSensitivity * 100));
     this.valSens.textContent = this.mouseSensitivity.toFixed(2);
+
+    this.renderKeybindUI();
+    this.updateSkillKeyLabels();
+  }
+
+  private updateSkillKeyLabels(): void {
+    this.hudDashKey.textContent = formatKeyCode(this.keybinds.dash);
+    this.hudPulseKey.textContent = formatKeyCode(this.keybinds.pulse);
+  }
+
+  private renderKeybindUI(): void {
+    this.keybindGrid.innerHTML = '';
+    for (const action of Object.keys(ACTION_LABELS) as ActionKey[]) {
+      const label = document.createElement('span');
+      label.textContent = ACTION_LABELS[action];
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-secondary keybind-btn';
+      btn.textContent =
+        this.listeningAction === action ? 'Nhấn phím...' : formatKeyCode(this.keybinds[action]);
+      btn.addEventListener('click', () => {
+        this.listeningAction = action;
+        this.keybindError.textContent = '';
+        this.renderKeybindUI();
+      });
+      this.keybindGrid.append(label, btn);
+    }
+  }
+
+  private pushCaption(text: string, ttl = 3.2): void {
+    this.captions = this.captions.filter((c) => c.text !== text);
+    this.captions.push({ text, ttl });
+    if (this.captions.length > 3) this.captions.shift();
+    this.renderCaptionsDOM();
+  }
+
+  private renderCaptionsDOM(): void {
+    this.captionFeed.innerHTML = '';
+    for (const c of this.captions) {
+      const pill = document.createElement('div');
+      pill.className = 'caption-pill';
+      pill.textContent = c.text;
+      this.captionFeed.appendChild(pill);
+    }
+  }
+
+  private async openLeaderboard(): Promise<void> {
+    const entries = await fetchLeaderboard();
+    this.lbTbody.innerHTML = '';
+    if (entries.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="4" style="text-align:center;">Chưa có điểm nào được lưu.</td>';
+      this.lbTbody.appendChild(tr);
+    } else {
+      entries.forEach((e, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${idx + 1}</td><td>${e.name}</td><td class="gold">${e.score}</td><td>${e.nights_won}/3</td>`;
+        this.lbTbody.appendChild(tr);
+      });
+    }
+    this.menuScreen.classList.remove('visible');
+    this.leaderboardScreen.classList.add('visible');
   }
 
   private buildMoteBar(capacity = TUNING.carry_capacity): void {
@@ -905,7 +1012,10 @@ class DaoDenLongApp {
   }
 
   private openNightIntro(night: NightId, resetCampaign = false): void {
-    if (resetCampaign) this.campaignTotalScore = 0;
+    if (resetCampaign) {
+      this.campaignTotalScore = 0;
+      this.nightsWonCount = 0;
+    }
     this.currentNight = night;
     const def = NIGHT_MAPS[night];
     this.introTitle.textContent = def.name;
@@ -919,6 +1029,11 @@ class DaoDenLongApp {
     this.rebuildWorldForNight(night);
     this.lastCountdownSec = 11;
     this.wasWindWarning = false;
+    this.lowFuelWarned.clear();
+    this.captions = [];
+    this.renderCaptionsDOM();
+    this.recentShadePos = null;
+    this.recentShadeTimer = 0;
     this.camYawDeg = 0;
     this.sound.startBgm();
     this.syncEntities(true);
@@ -946,15 +1061,23 @@ class DaoDenLongApp {
         case 'pulse':
           this.sound.playPulse();
           this.spawnPulseWave();
-          this.cameraShake = Math.min(1, this.cameraShake + 0.35);
+          if (!this.reducedMotion) this.cameraShake = Math.min(1, this.cameraShake + 0.35);
           break;
         case 'player_hit':
           this.sound.playHit();
-          this.cameraShake = Math.min(1, this.cameraShake + 0.7);
+          if (!this.reducedMotion) this.cameraShake = Math.min(1, this.cameraShake + 0.7);
           break;
-        case 'shade_spawned':
+        case 'shade_spawned': {
           this.sound.playShadeSpawn();
+          const sId = ev.data.id as string;
+          const spawned = this.sim.shades.find((s) => s.id === sId);
+          if (spawned) {
+            this.recentShadePos = new THREE.Vector3(spawned.x, spawned.y + 1.2, spawned.z);
+            this.recentShadeTimer = 4.0;
+          }
+          this.pushCaption('⚠ Bóng Mực vừa xuất hiện!');
           break;
+        }
         case 'paused':
           this.setScreen('paused');
           break;
@@ -964,31 +1087,37 @@ class DaoDenLongApp {
         case 'game_over': {
           const res = ev.data.result as string;
           const reason = ev.data.reason as string;
+          this.saveScoreMsg.textContent = '';
+          this.btnSaveScore.disabled = false;
           if (res === 'won') {
             this.sound.playWin();
             this.campaignTotalScore += this.sim.score;
+            this.nightsWonCount = Math.min(3, this.nightsWonCount + 1);
             if (this.currentNight < 3) {
               this.resultTitle.textContent = `Thắng ${NIGHT_MAPS[this.currentNight].name}!`;
-              this.resultDesc.textContent = `Điểm Đêm ${this.currentNight}: ${this.sim.score} · Tổng điểm hành trình: ${this.campaignTotalScore}`;
+              this.resultDesc.textContent = `Giữ đảo sáng tới bình minh! Điểm Đêm ${this.currentNight}: ${this.sim.score}`;
               this.resultScore.textContent = `Tổng điểm: ${this.campaignTotalScore}`;
               this.btnResultNext.style.display = 'inline-block';
+              this.saveScoreBox.style.display = 'none';
             } else {
               this.resultTitle.textContent = 'Bình Minh Trên Ba Hòn Đảo!';
               this.resultDesc.textContent =
-                'Mây đã thắp sáng toàn bộ Đảo Bến, Đảo Cau và Đảo Chuông. Ánh bình minh rực rỡ đã trở lại!';
+                'Mây đã giữ sáng toàn bộ Đảo Bến, Đảo Cau và Đảo Chuông tới bình minh!';
               this.resultScore.textContent = `Tổng điểm cả 3 Đêm: ${this.campaignTotalScore}`;
               this.btnResultNext.style.display = 'none';
+              this.saveScoreBox.style.display = 'block';
             }
           } else {
             this.sound.playLose();
             this.resultTitle.textContent =
-              reason === 'dawn' ? 'Hết Thời Gian' : 'Ngọn Lửa Đã Tắt';
+              reason === 'dawn' ? 'Chưa Đủ Đèn Sáng Khi Bình Minh' : 'Ngọn Lửa Đã Tắt';
             this.resultDesc.textContent =
               reason === 'dawn'
-                ? 'Bình minh tới trước khi toàn bộ Đèn Lồng kịp sáng.'
-                : 'Mây đã mất hết Ngọn Lửa. Bạn có thể chơi lại Đêm này ngay!';
-            this.resultScore.textContent = `Điểm Đêm: ${this.sim.score}`;
+                ? 'Bình minh tới nhưng số đèn sáng chưa đạt ngưỡng giữ đảo.'
+                : 'Mây đã mất hết Ngọn Lửa. Bạn có thể lưu điểm hoặc chơi lại Đêm này!';
+            this.resultScore.textContent = `Tổng điểm đã thắng: ${this.campaignTotalScore}`;
             this.btnResultNext.style.display = 'none';
+            this.saveScoreBox.style.display = 'block';
           }
           this.setScreen('result');
           break;
@@ -1029,7 +1158,13 @@ class DaoDenLongApp {
         litCount++;
         const fuelRatio = Math.max(0, Math.min(1, lantern.fuel60 / FUEL_MAX_60));
         const isLowFuel = lantern.fuel60 < LOW_FUEL_THRESHOLD_60;
-        const flickerMult = isLowFuel && !blink1Hz ? 0.35 : 1.0;
+        const flickerMult = isLowFuel && !this.reducedMotion && !blink1Hz ? 0.35 : 1.0;
+        if (isLowFuel && !this.lowFuelWarned.has(lantern.id)) {
+          this.lowFuelWarned.add(lantern.id);
+          this.pushCaption(`⚠ Đèn ${lantern.id} sắp cạn dầu (<30%)!`);
+        } else if (!isLowFuel) {
+          this.lowFuelWarned.delete(lantern.id);
+        }
 
         vis.bulb.scale.set(1, 1.25, 1);
         if (vis.bulbMat.map !== this.paperLanternTex) {
@@ -1190,6 +1325,7 @@ class DaoDenLongApp {
       posAttr.needsUpdate = true;
       if (this.sim.wind.warning && !this.wasWindWarning) {
         this.sound.playWindWarning();
+        this.pushCaption('⚠ Gió mạnh sắp thổi trong 2 giây!');
       }
     } else {
       leafMat.opacity = 0;
@@ -1214,8 +1350,11 @@ class DaoDenLongApp {
     this.hudTime.textContent = `${warnPrefix}${mm}:${ss}`;
     this.hudTime.classList.toggle('danger', totalSec <= 30);
 
-    // 10-second final countdown beep
+    // 10-second final countdown beep + visual caption
     if (this.sim.state === 'playing' && totalSec <= 10 && totalSec > 0 && totalSec < this.lastCountdownSec) {
+      if (this.lastCountdownSec === 11) {
+        this.pushCaption('⚠ Còn 10 giây tới bình minh!');
+      }
       this.lastCountdownSec = totalSec;
       this.sound.playCountdownTick();
     }
@@ -1274,20 +1413,24 @@ class DaoDenLongApp {
       this.promptBanner.style.display = 'none';
     }
 
-    // Off-screen indicator arrow toward nearest unlit lantern
-    this.updateOffscreenArrow(nearestOffscreenLantern);
+    // Off-screen indicator arrows (nearest unlit lantern + recently spawned shade)
+    this.updateEdgeArrow(this.lanternArrow, nearestOffscreenLantern);
+    this.updateEdgeArrow(
+      this.shadeArrow,
+      this.recentShadeTimer > 0 ? this.recentShadePos : null,
+    );
   }
 
-  private updateOffscreenArrow(targetWorld: THREE.Vector3 | null): void {
+  private updateEdgeArrow(el: HTMLElement, targetWorld: THREE.Vector3 | null): void {
     if (!targetWorld || this.screenMode !== 'playing') {
-      this.lanternArrow.style.display = 'none';
+      el.style.display = 'none';
       return;
     }
     const proj = targetWorld.clone().project(this.camera);
     const inFront = proj.z < 1;
     const onScreen = inFront && Math.abs(proj.x) <= 0.92 && Math.abs(proj.y) <= 0.92;
     if (onScreen) {
-      this.lanternArrow.style.display = 'none';
+      el.style.display = 'none';
       return;
     }
 
@@ -1304,31 +1447,31 @@ class DaoDenLongApp {
     const cx = w / 2 + Math.cos(angle) * (w / 2 - pad);
     const cy = h / 2 - Math.sin(angle) * (h / 2 - pad);
 
-    this.lanternArrow.style.display = 'flex';
-    this.lanternArrow.style.left = `${Math.max(pad, Math.min(w - pad, cx))}px`;
-    this.lanternArrow.style.top = `${Math.max(pad, Math.min(h - pad, cy))}px`;
+    el.style.display = 'flex';
+    el.style.left = `${Math.max(pad, Math.min(w - pad, cx))}px`;
+    el.style.top = `${Math.max(pad, Math.min(h - pad, cy))}px`;
     const deg = (-angle * 180) / Math.PI + 90;
-    this.lanternArrow.style.transform = `translate(-50%, -50%) rotate(${deg}deg)`;
+    el.style.transform = `translate(-50%, -50%) rotate(${deg}deg)`;
   }
 
   private pollInput(): InputState {
     const input = createDefaultInputState();
     let mx = 0;
     let mz = 0;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) mx -= 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) mx += 1;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) mz += 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) mz -= 1;
+    if (this.keys.has(this.keybinds.moveRight) || this.keys.has('ArrowRight')) mx -= 1;
+    if (this.keys.has(this.keybinds.moveLeft) || this.keys.has('ArrowLeft')) mx += 1;
+    if (this.keys.has(this.keybinds.moveUp) || this.keys.has('ArrowUp')) mz += 1;
+    if (this.keys.has(this.keybinds.moveDown) || this.keys.has('ArrowDown')) mz -= 1;
 
     if (this.keys.has('KeyZ') || this.keys.has('BracketLeft')) this.camYawDeg += 1.8;
     if (this.keys.has('KeyC') || this.keys.has('BracketRight')) this.camYawDeg -= 1.8;
 
     input.move = [mx, mz];
     input.cam_yaw_deg = this.camYawDeg;
-    input.jump = this.keys.has('Space');
-    input.interact = this.keys.has('KeyE') || this.keys.has('KeyF') || this.keys.has('Enter');
-    input.dash = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
-    input.pulse = this.keys.has('KeyQ') || this.keys.has('KeyK');
+    input.jump = this.keys.has(this.keybinds.jump);
+    input.interact = this.keys.has(this.keybinds.interact) || this.keys.has('Enter');
+    input.dash = this.keys.has(this.keybinds.dash) || this.keys.has('ShiftRight');
+    input.pulse = this.keys.has(this.keybinds.pulse) || this.keys.has('KeyK');
     input.pause = this.pauseToggleQueued;
     this.pauseToggleQueued = false;
     return input;
@@ -1406,10 +1549,31 @@ class DaoDenLongApp {
 
   private bindEvents(): void {
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && !this.keys.has('Space') && this.screenMode === 'playing' && this.sim.player.grounded) {
+      if (this.listeningAction) {
+        e.preventDefault();
+        const conflict = findKeyConflict(this.keybinds, this.listeningAction, e.code);
+        if (conflict) {
+          this.keybindError.textContent = `⚠ Phím ${formatKeyCode(e.code)} đang trùng với "${ACTION_LABELS[conflict]}"!`;
+        } else {
+          this.keybinds[this.listeningAction] = e.code;
+          saveKeyBindings(this.keybinds);
+          this.keybindError.textContent = '';
+          this.listeningAction = null;
+          this.updateSkillKeyLabels();
+        }
+        this.renderKeybindUI();
+        return;
+      }
+
+      if (
+        e.code === this.keybinds.jump &&
+        !this.keys.has(this.keybinds.jump) &&
+        this.screenMode === 'playing' &&
+        this.sim.player.grounded
+      ) {
         this.sound.playJump();
       }
-      if ((e.code === 'Escape' || e.code === 'KeyP') && !e.repeat) {
+      if ((e.code === this.keybinds.pause || e.code === 'KeyP') && !e.repeat) {
         if (this.screenMode === 'playing' || this.screenMode === 'paused') {
           this.pauseToggleQueued = true;
         }
@@ -1470,11 +1634,27 @@ class DaoDenLongApp {
       this.pauseScreen.classList.remove('visible');
       this.settingsScreen.classList.add('visible');
     };
+    document.getElementById('btn-menu-leaderboard')!.addEventListener('click', () => {
+      void this.openLeaderboard();
+    });
+    document.getElementById('btn-lb-close')!.addEventListener('click', () => {
+      this.leaderboardScreen.classList.remove('visible');
+      this.setScreen('menu');
+    });
     document.getElementById('btn-menu-settings')!.addEventListener('click', () => openSettings('menu'));
     document.getElementById('btn-pause-settings')!.addEventListener('click', () => openSettings('paused'));
     document.getElementById('btn-settings-close')!.addEventListener('click', () => {
+      this.listeningAction = null;
       this.settingsScreen.classList.remove('visible');
       this.setScreen(this.settingsReturnTo);
+    });
+    document.getElementById('btn-reset-keys')!.addEventListener('click', () => {
+      this.keybinds = { ...DEFAULT_KEYBINDS };
+      saveKeyBindings(this.keybinds);
+      this.listeningAction = null;
+      this.keybindError.textContent = '';
+      this.renderKeybindUI();
+      this.updateSkillKeyLabels();
     });
 
     this.sliderVolume.addEventListener('input', () => {
@@ -1492,6 +1672,33 @@ class DaoDenLongApp {
       this.colorblindMode = this.toggleColorblind.checked;
       document.body.classList.toggle('colorblind', this.colorblindMode);
       window.localStorage.setItem('ddl_colorblind', String(this.colorblindMode));
+    });
+    this.toggleReducedMotion.addEventListener('change', () => {
+      this.reducedMotion = this.toggleReducedMotion.checked;
+      document.body.classList.toggle('reduced-motion', this.reducedMotion);
+      window.localStorage.setItem('ddl_reduced_motion', String(this.reducedMotion));
+    });
+    this.toggleLargeText.addEventListener('change', () => {
+      this.largeText = this.toggleLargeText.checked;
+      document.body.classList.toggle('large-text', this.largeText);
+      window.localStorage.setItem('ddl_large_text', String(this.largeText));
+    });
+
+    this.btnSaveScore.addEventListener('click', async () => {
+      const rawName = this.inputPlayerName.value.trim();
+      if (!validatePlayerName(rawName)) {
+        this.saveScoreMsg.textContent = 'Tên phải dài 3–12 ký tự (chữ cái, số hoặc dấu _).';
+        return;
+      }
+      this.btnSaveScore.disabled = true;
+      await submitLeaderboardEntry({
+        name: rawName,
+        score: this.campaignTotalScore,
+        nights_won: this.nightsWonCount,
+        achieved_at: formatLocalIsoTimestamp(),
+        seed: this.sim.seed,
+      });
+      this.saveScoreMsg.textContent = 'Đã lưu vào Bảng xếp hạng!';
     });
 
     this.btnResultNext.addEventListener('click', () => {
@@ -1547,6 +1754,20 @@ class DaoDenLongApp {
       }
     }
 
+    if (this.recentShadeTimer > 0) {
+      this.recentShadeTimer = Math.max(0, this.recentShadeTimer - frameDt);
+    }
+    if (this.captions.length > 0) {
+      let changed = false;
+      for (const c of this.captions) c.ttl -= frameDt;
+      const next = this.captions.filter((c) => c.ttl > 0);
+      if (next.length !== this.captions.length) {
+        this.captions = next;
+        changed = true;
+      }
+      if (changed) this.renderCaptionsDOM();
+    }
+
     this.syncEntities(false);
     this.updateCamera(frameDt);
     this.updateOcclusion(frameDt);
@@ -1556,5 +1777,12 @@ class DaoDenLongApp {
 
 const container = document.getElementById('canvas-container');
 if (container) {
-  new DaoDenLongApp(container);
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('bench') === '1') {
+    const seed = Number.parseInt(params.get('seed') ?? '42', 10);
+    const duration = Number.parseFloat(params.get('duration') ?? '30');
+    runBenchmarkMode(container, Number.isInteger(seed) ? seed : 42, Number.isFinite(duration) ? duration : 30);
+  } else {
+    new DaoDenLongApp(container);
+  }
 }

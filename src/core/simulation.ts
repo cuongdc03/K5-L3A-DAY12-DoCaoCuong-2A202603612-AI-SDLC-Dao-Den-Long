@@ -430,31 +430,33 @@ export class GameSimulation {
   }
 
   private savePrevInput(input: InputState): void {
-    this.prevInput = {
-      move: [input.move[0], input.move[1]],
-      cam_yaw_deg: input.cam_yaw_deg,
-      jump: input.jump,
-      interact: input.interact,
-      pulse: input.pulse,
-      dash: input.dash,
-      pause: input.pause,
-    };
+    this.prevInput.move[0] = input.move[0];
+    this.prevInput.move[1] = input.move[1];
+    this.prevInput.cam_yaw_deg = input.cam_yaw_deg;
+    this.prevInput.jump = input.jump;
+    this.prevInput.interact = input.interact;
+    this.prevInput.pulse = input.pulse;
+    this.prevInput.dash = input.dash;
+    this.prevInput.pause = input.pause;
   }
 
   private hasSafeZone(lantern: LanternEntity): boolean {
     return lantern.lit && lantern.fuel60 >= LOW_FUEL_THRESHOLD_60;
   }
 
+  private static readonly EMPTY_EVENTS: EventRecord[] = [];
+
   /**
    * Executes 1 fixed 1/60s step following TICKET-02 + TICKET-03 mandatory tick order.
    */
   step(input: InputState): EventRecord[] {
     if (this.state === 'won' || this.state === 'lost') {
-      return [];
+      return GameSimulation.EMPTY_EVENTS;
     }
 
-    const events: EventRecord[] = [];
+    let events: EventRecord[] | null = null;
     const emit = (name: EventName, data: Record<string, unknown>) => {
+      if (events === null) events = [];
       events.push({ type: 'event', tick: this.tick, name, data });
     };
 
@@ -468,7 +470,7 @@ export class GameSimulation {
       this.state = 'paused';
       emit('paused', {});
       this.savePrevInput(input);
-      return events;
+      return events ?? GameSimulation.EMPTY_EVENTS;
     }
     if (this.state === 'paused') {
       if (pausePressed) {
@@ -476,7 +478,7 @@ export class GameSimulation {
         emit('resumed', {});
       } else {
         this.savePrevInput(input);
-        return events;
+        return events ?? GameSimulation.EMPTY_EVENTS;
       }
     }
 
@@ -504,17 +506,18 @@ export class GameSimulation {
       }
     }
 
-    // Dropped motes TTL
+    // Dropped motes TTL (in-place compaction to avoid per-tick allocations)
     if (this.motes.length > 0) {
-      const surviving: MoteEntity[] = [];
-      for (const m of this.motes) {
+      let writeIdx = 0;
+      for (let i = 0; i < this.motes.length; i++) {
+        const m = this.motes[i];
         if (m.kind === 'dropped' && m.ttlTicks !== null) {
           m.ttlTicks -= 1;
           if (m.ttlTicks <= 0) continue;
         }
-        surviving.push(m);
+        this.motes[writeIdx++] = m;
       }
-      this.motes = surviving;
+      this.motes.length = writeIdx;
     }
 
     // Charm respawn timers
@@ -796,8 +799,9 @@ export class GameSimulation {
     if (this.player.respawnWaitTicks === 0 && this.player.flames > 0) {
       const capacity = this.getPlayerCapacity();
       if (this.player.carried < capacity && this.motes.length > 0) {
-        const remaining: MoteEntity[] = [];
-        for (const mote of this.motes) {
+        let writeIdx = 0;
+        for (let i = 0; i < this.motes.length; i++) {
+          const mote = this.motes[i];
           const canPick =
             this.player.carried < capacity &&
             mote.createdTick < this.simTick &&
@@ -808,10 +812,10 @@ export class GameSimulation {
             this.player.carried += 1;
             emit('mote_picked', { carried: this.player.carried });
           } else {
-            remaining.push(mote);
+            this.motes[writeIdx++] = mote;
           }
         }
-        this.motes = remaining;
+        this.motes.length = writeIdx;
       }
 
       for (const charm of this.charms) {
@@ -1291,8 +1295,10 @@ export class GameSimulation {
     // Step 9: Contacts — Drifters steal first, then Shades hit (ascending id)
     // ------------------------------------------------------------------
     if (this.player.respawnWaitTicks === 0 && this.player.flames > 0) {
-      const sortedDrifters = [...this.drifters].sort((a, b) => a.id.localeCompare(b.id));
-      for (const drifter of sortedDrifters) {
+      if (this.drifters.length > 1) {
+        this.drifters.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      }
+      for (const drifter of this.drifters) {
         if (
           drifter.state === 'chase' &&
           !drifter.hasStolen &&
@@ -1314,9 +1320,11 @@ export class GameSimulation {
         }
       }
 
-      if (this.player.invulnTicks <= 0) {
-        const sortedShades = [...this.shades].sort((a, b) => a.id.localeCompare(b.id));
-        for (const shade of sortedShades) {
+      if (this.player.invulnTicks <= 0 && this.shades.length > 0) {
+        if (this.shades.length > 1) {
+          this.shades.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        }
+        for (const shade of this.shades) {
           if (shade.createdTick >= this.simTick) continue;
           if (shade.safePushTicks > 0) continue;
           if (shade.state !== 'chase' && shade.state !== 'wander') continue;
@@ -1473,7 +1481,7 @@ export class GameSimulation {
     }
 
     this.savePrevInput(input);
-    return events;
+    return events ?? GameSimulation.EMPTY_EVENTS;
   }
 
   private spawnDroppedMotesAt(
