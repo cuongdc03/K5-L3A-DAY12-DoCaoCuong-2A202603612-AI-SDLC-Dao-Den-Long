@@ -1,0 +1,26 @@
+{
+  "player": {
+    "pos": [
+      35,
+      0,
+      0
+    ],
+    "carried": 6,
+    "flames": 3
+  },
+  "random_motes": false,
+  "random_shades": false,
+  "random_drifters": false,
+  "drifters": [
+    {
+      "id": "D1",
+      "pos": [
+        35.5,
+        0,
+        0
+      ],
+      "state": "chase",
+      "stolen": 0
+    }
+  ]
+}

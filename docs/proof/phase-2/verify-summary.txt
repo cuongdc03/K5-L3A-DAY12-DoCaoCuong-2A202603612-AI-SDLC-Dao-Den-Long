@@ -1,0 +1,11 @@
+=== Phase 2 Verification Summary (Contract v1.1) ===
+Timestamp: 2026-11-20T08:31:29.276Z
+Node: v22.23.0
+[PASS] TypeScript typecheck (tsc --noEmit)
+[PASS] Build (dist/headless.mjs + dist/web/)
+[PASS] Vitest unit, Phase 1 regression & Contract v1.1 suite
+[PASS] Scenario Dash & Fall/Respawn (Night 1): dash emitted, fall lost=4, respawned
+[PASS] Scenario Night 2 (Charm + Drifter steal + Pulse drop): all events verified
+[PASS] Scenario Night 3 (Tier 2 Jump Pad + Strong Wind + Pause/Resume): verified
+[PASS] Perf Benchmark (Night 3, 21,600 ticks): 0.120s (limit <= 30s)
+[PASS] Determinism (Night 3, seed=2026, 1800 ticks): SHA-256 identical (1b19b795ec74057ca4ec0dd5be333ae034f9efc0864ef94bc6bb392060c75178)

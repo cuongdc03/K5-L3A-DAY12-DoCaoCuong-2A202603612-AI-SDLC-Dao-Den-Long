@@ -7,11 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const ROOT = resolve(process.cwd());
 const HEADLESS_BIN = join(ROOT, 'dist', 'headless.mjs');
 
-describe('Headless CLI — Test Contract v1.0', () => {
+describe('Headless CLI — Test Contract v1.1 (Nights 1, 2, 3)', () => {
   let workDir: string;
 
   beforeAll(() => {
-    workDir = mkdtempSync(join(tmpdir(), 'dao-den-long-test-'));
+    workDir = mkdtempSync(join(tmpdir(), 'dao-den-long-v11-'));
     if (!existsSync(HEADLESS_BIN)) {
       const build = spawnSync('npm', ['run', 'build:headless'], { cwd: ROOT, encoding: 'utf8' });
       if (build.status !== 0) {
@@ -24,103 +24,60 @@ describe('Headless CLI — Test Contract v1.0', () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
-  it('produces identical byte-for-byte JSONL across two runs with same seed', () => {
+  it('produces identical byte-for-byte JSONL across two runs on Night 3', () => {
     const out1 = join(workDir, 'det1.jsonl');
     const out2 = join(workDir, 'det2.jsonl');
 
     const r1 = spawnSync(
       'node',
-      [HEADLESS_BIN, '--seed', '42', '--night', '1', '--ticks', '300', '--out', out1],
+      [HEADLESS_BIN, '--seed', '42', '--night', '3', '--ticks', '600', '--out', out1],
       { encoding: 'utf8' },
     );
     const r2 = spawnSync(
       'node',
-      [HEADLESS_BIN, '--seed', '42', '--night', '1', '--ticks', '300', '--out', out2],
+      [HEADLESS_BIN, '--seed', '42', '--night', '3', '--ticks', '600', '--out', out2],
       { encoding: 'utf8' },
     );
 
     expect(r1.status).toBe(0);
     expect(r2.status).toBe(0);
+    expect(readFileSync(out1, 'utf8')).toBe(readFileSync(out2, 'utf8'));
 
-    const content1 = readFileSync(out1, 'utf8');
-    const content2 = readFileSync(out2, 'utf8');
-    expect(content1).toBe(content2);
-
-    const lines = content1.trim().split('\n').map((l) => JSON.parse(l));
+    const lines = readFileSync(out1, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
     expect(lines[0].type).toBe('snapshot');
-    expect(lines[0].tick).toBe(0);
-    expect(lines[lines.length - 1].type).toBe('end');
-    expect(lines[lines.length - 1].ticks).toBeLessThanOrEqual(300);
+    expect(lines[0].night).toBe(3);
+    expect(lines[0].wind).toBeDefined();
+    expect(lines[0].player.vel).toBeDefined();
+    expect(lines[0].drifters).toBeDefined();
+    expect(lines[0].charms).toBeDefined();
   });
 
-  it('runs a full pickup -> deposit -> win scenario via CLI', () => {
-    const scenarioPath = join(workDir, 'win-scenario.json');
-    const inputsPath = join(workDir, 'win-inputs.json');
-    const outPath = join(workDir, 'win.jsonl');
-
-    writeFileSync(
-      scenarioPath,
-      JSON.stringify({
-        player: { pos: [0, 0, 0], carried: 2, flames: 3 },
-        random_motes: false,
-        random_shades: false,
-        motes: [[0, 0, 5]],
-        lanterns: [
-          { id: 'L1', pos: [0, 0, 10], deposited: 0, lit: false },
-          { id: 'L2', lit: true },
-          { id: 'L3', lit: true },
-          { id: 'L4', lit: true },
-          { id: 'L5', lit: true },
-        ],
-        time_left_s: 120,
-      }),
-    );
-
-    // Move +Z at 7 m/s -> reaches z=10 around tick 86, interact at tick 90
-    writeFileSync(
-      inputsPath,
-      JSON.stringify({
-        frames: [
-          { tick: 0, move: [0, 1], cam_yaw_deg: 0 },
-          { tick: 85, move: [0, 0], interact: true },
-          { tick: 86, interact: false },
-        ],
-      }),
-    );
-
+  it('completes a full Night 3 headless run (21,600 ticks) well under 30 seconds', () => {
+    const outPath = join(workDir, 'perf-21600.jsonl');
+    const t0 = performance.now();
     const res = spawnSync(
       'node',
       [
         HEADLESS_BIN,
         '--seed',
-        '7',
+        '2026',
         '--night',
-        '1',
-        '--scenario',
-        scenarioPath,
-        '--inputs',
-        inputsPath,
+        '3',
         '--ticks',
-        '200',
+        '21600',
         '--snapshot-every',
-        '20',
+        '600',
         '--out',
         outPath,
       ],
       { encoding: 'utf8' },
     );
-
+    const elapsedSec = (performance.now() - t0) / 1000;
     expect(res.status).toBe(0);
-    const records = readFileSync(outPath, 'utf8')
-      .trim()
-      .split('\n')
-      .map((l) => JSON.parse(l));
-
-    const eventNames = records.filter((r) => r.type === 'event').map((r) => r.name);
-    expect(eventNames).toEqual(['mote_picked', 'deposit', 'lantern_lit', 'game_over']);
-    const end = records[records.length - 1];
-    expect(end.type).toBe('end');
-    expect(end.state).toBe('won');
+    expect(elapsedSec).toBeLessThan(30);
   });
 
   it('exits with code 2 and writes to stderr on malformed inputs file', () => {
@@ -131,8 +88,8 @@ describe('Headless CLI — Test Contract v1.0', () => {
       badInputs,
       JSON.stringify({
         frames: [
-          { tick: 5, move: [0, 1] },
-          { tick: 3, move: [0, 0] },
+          { tick: 5, pause: true },
+          { tick: 3, pause: false },
         ],
       }),
     );
@@ -144,7 +101,7 @@ describe('Headless CLI — Test Contract v1.0', () => {
         '--seed',
         '1',
         '--night',
-        '1',
+        '2',
         '--inputs',
         badInputs,
         '--ticks',

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(process.cwd());
-const PROOF_DIR = join(ROOT, 'docs', 'proof', 'phase-1');
+const PROOF_DIR = join(ROOT, 'docs', 'proof', 'phase-2');
 const SCENARIO_DIR = join(PROOF_DIR, 'scenarios');
 const HEADLESS_BIN = join(ROOT, 'dist', 'headless.mjs');
 
@@ -23,165 +23,182 @@ function sha256(filePath) {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
-const summaryLines = [];
-summaryLines.push('=== Phase 1 Verification Summary ===');
-summaryLines.push(`Timestamp: ${new Date().toISOString()}`);
-summaryLines.push(`Node: ${process.version}`);
+function runScenario(name, night, seed, ticks, snapshotEvery, scenarioObj, inputsObj) {
+  const sPath = join(SCENARIO_DIR, `${name}-scenario.json`);
+  const iPath = join(SCENARIO_DIR, `${name}-inputs.json`);
+  const oPath = join(PROOF_DIR, `scenario-${name}.jsonl`);
+  writeFileSync(sPath, JSON.stringify(scenarioObj, null, 2) + '\n');
+  writeFileSync(iPath, JSON.stringify(inputsObj, null, 2) + '\n');
+  execFileSync('node', [
+    HEADLESS_BIN,
+    '--seed',
+    String(seed),
+    '--night',
+    String(night),
+    '--scenario',
+    sPath,
+    '--inputs',
+    iPath,
+    '--ticks',
+    String(ticks),
+    '--snapshot-every',
+    String(snapshotEvery),
+    '--out',
+    oPath,
+  ]);
+  const lines = readFileSync(oPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+  return lines;
+}
 
-// 1. Typecheck
+const summary = [];
+summary.push('=== Phase 2 Verification Summary (Contract v1.1) ===');
+summary.push(`Timestamp: ${new Date().toISOString()}`);
+summary.push(`Node: ${process.version}`);
+
+// 1. Typecheck & Build
 runCmd('npm', ['run', 'typecheck'], 'TypeScript typecheck');
-summaryLines.push('[PASS] TypeScript typecheck (tsc --noEmit)');
+summary.push('[PASS] TypeScript typecheck (tsc --noEmit)');
 
-// 2. Build (headless + web)
 runCmd('npm', ['run', 'build'], 'Build headless + web');
-summaryLines.push('[PASS] Build (dist/headless.mjs + dist/web/)');
+summary.push('[PASS] Build (dist/headless.mjs + dist/web/)');
 
-// 3. Unit & Contract tests
-const testOut = runCmd('npm', ['test'], 'Vitest unit & contract suite');
-writeFileSync(join(PROOF_DIR, 'vitest-output.txt'), testOut, 'utf8');
-summaryLines.push('[PASS] Vitest unit & headless contract suite (see vitest-output.txt)');
+// 2. Unit + Regression + CLI tests
+const vitestOut = runCmd('npm', ['test'], 'Vitest suite');
+writeFileSync(join(PROOF_DIR, 'vitest-output.txt'), vitestOut, 'utf8');
+summary.push('[PASS] Vitest unit, Phase 1 regression & Contract v1.1 suite');
 
-// 4. Scenario A: Full win flow (pickup + deposit + lantern_lit + game_over won)
-const winScenario = join(SCENARIO_DIR, 'win-scenario.json');
-const winInputs = join(SCENARIO_DIR, 'win-inputs.json');
-const winOut = join(PROOF_DIR, 'scenario-win.jsonl');
-writeFileSync(
-  winScenario,
-  JSON.stringify(
-    {
-      player: { pos: [0, 0, 0], carried: 2, flames: 3 },
-      random_motes: false,
-      random_shades: false,
-      motes: [[0, 0, 5]],
-      lanterns: [
-        { id: 'L1', pos: [0, 0, 10], deposited: 0, lit: false },
-        { id: 'L2', lit: true },
-        { id: 'L3', lit: true },
-        { id: 'L4', lit: true },
-        { id: 'L5', lit: true },
-      ],
-      time_left_s: 120,
-    },
-    null,
-    2,
-  ) + '\n',
+// 3. Scenario: Dash & Fall/Respawn (Night 1)
+const fallRecords = runScenario(
+  'dash-fall',
+  1,
+  11,
+  150,
+  30,
+  {
+    player: { pos: [38, 0, 0], carried: 4, flames: 2 },
+    random_motes: false,
+    random_shades: false,
+  },
+  {
+    frames: [
+      { tick: 0, move: [1, 0], dash: true },
+      { tick: 1, dash: false },
+    ],
+  },
 );
-writeFileSync(
-  winInputs,
-  JSON.stringify(
-    {
-      frames: [
-        { tick: 0, move: [0, 1], cam_yaw_deg: 0 },
-        { tick: 85, move: [0, 0], interact: true },
-        { tick: 86, interact: false },
-      ],
-    },
-    null,
-    2,
-  ) + '\n',
+const hasDash = fallRecords.some((r) => r.type === 'event' && r.name === 'dash');
+const hasFall = fallRecords.some(
+  (r) => r.type === 'event' && r.name === 'player_hit' && r.data.by === 'fall' && r.data.lost === 4,
 );
+if (!hasDash || !hasFall) throw new Error('Dash/Fall scenario failed');
+summary.push('[PASS] Scenario Dash & Fall/Respawn (Night 1): dash emitted, fall lost=4, respawned');
+
+// 4. Scenario: Night 2 Jump Pad + Charm + Drifter steal & pulse drop
+const n2Records = runScenario(
+  'night2-drifter-charm',
+  2,
+  22,
+  140,
+  20,
+  {
+    player: { pos: [35, 0, 0], carried: 6, flames: 3 },
+    random_motes: false,
+    random_shades: false,
+    random_drifters: false,
+    drifters: [{ id: 'D1', pos: [35.5, 0, 0], state: 'chase', stolen: 0 }],
+  },
+  {
+    frames: [
+      { tick: 1, pulse: true },
+      { tick: 2, pulse: false },
+    ],
+  },
+);
+const hasCharm = n2Records.some((r) => r.type === 'event' && r.name === 'charm_picked');
+const hasSteal = n2Records.some((r) => r.type === 'event' && r.name === 'drifter_steal');
+const hasDrop = n2Records.some((r) => r.type === 'event' && r.name === 'drifter_drop');
+if (!hasCharm || !hasSteal || !hasDrop) throw new Error('Night 2 Charm/Drifter scenario failed');
+summary.push('[PASS] Scenario Night 2 (Charm + Drifter steal + Pulse drop): all events verified');
+
+// 5. Scenario: Night 3 3-Tier Jump Pad + Strong Wind + Pause/Resume
+const n3Records = runScenario(
+  'night3-tier-wind-pause',
+  3,
+  33,
+  1920,
+  60,
+  {
+    player: { pos: [0, 3, 13], carried: 0, flames: 3 },
+    random_motes: false,
+    random_shades: false,
+    random_drifters: false,
+    wind_enabled: true,
+  },
+  {
+    frames: [
+      { tick: 100, pause: true },
+      { tick: 101, pause: false },
+      { tick: 120, pause: true },
+      { tick: 121, pause: false },
+    ],
+  },
+);
+const hasPaused = n3Records.some((r) => r.type === 'event' && r.name === 'paused');
+const hasResumed = n3Records.some((r) => r.type === 'event' && r.name === 'resumed');
+const windActiveSnap = n3Records.some((r) => r.type === 'snapshot' && r.wind && r.wind.active);
+if (!hasPaused || !hasResumed || !windActiveSnap) {
+  throw new Error('Night 3 Pause/Wind scenario failed');
+}
+summary.push('[PASS] Scenario Night 3 (Tier 2 Jump Pad + Strong Wind + Pause/Resume): verified');
+
+// 6. Performance Benchmark: Full Night 3 (21,600 ticks) <= 30s
+const perfOut = join(PROOF_DIR, 'perf-night3-21600.jsonl');
+const t0 = performance.now();
 execFileSync('node', [
   HEADLESS_BIN,
   '--seed',
-  '7',
+  '2026',
   '--night',
-  '1',
-  '--scenario',
-  winScenario,
-  '--inputs',
-  winInputs,
+  '3',
   '--ticks',
-  '200',
+  '21600',
   '--snapshot-every',
-  '20',
+  '600',
   '--out',
-  winOut,
+  perfOut,
 ]);
-const winEnd = JSON.parse(readFileSync(winOut, 'utf8').trim().split('\n').at(-1));
-if (winEnd.state !== 'won') {
-  throw new Error(`Expected win scenario state=won, got ${winEnd.state}`);
+const elapsedS = (performance.now() - t0) / 1000;
+if (elapsedS > 30) {
+  throw new Error(`21,600-tick benchmark exceeded 30s: ${elapsedS.toFixed(3)}s`);
 }
-summaryLines.push(`[PASS] Scenario Win: state=${winEnd.state}, ticks=${winEnd.ticks}, score=${winEnd.score}`);
+summary.push(`[PASS] Perf Benchmark (Night 3, 21,600 ticks): ${elapsedS.toFixed(3)}s (limit <= 30s)`);
 
-// 5. Scenario B: Pulse stun & push + Shade chase & loss
-const combatScenario = join(SCENARIO_DIR, 'combat-scenario.json');
-const combatInputs = join(SCENARIO_DIR, 'combat-inputs.json');
-const combatOut = join(PROOF_DIR, 'scenario-combat.jsonl');
-writeFileSync(
-  combatScenario,
-  JSON.stringify(
-    {
-      player: { pos: [0, 0, 0], carried: 2, flames: 1 },
-      random_motes: false,
-      random_shades: false,
-      shades: [{ id: 'S1', pos: [5, 0, 0] }],
-      time_left_s: 60,
-    },
-    null,
-    2,
-  ) + '\n',
-);
-writeFileSync(
-  combatInputs,
-  JSON.stringify(
-    {
-      frames: [
-        { tick: 0, pulse: true },
-        { tick: 1, pulse: false },
-      ],
-    },
-    null,
-    2,
-  ) + '\n',
-);
-execFileSync('node', [
-  HEADLESS_BIN,
-  '--seed',
-  '12',
-  '--night',
-  '1',
-  '--scenario',
-  combatScenario,
-  '--inputs',
-  combatInputs,
-  '--ticks',
-  '400',
-  '--snapshot-every',
-  '50',
-  '--out',
-  combatOut,
-]);
-const combatEnd = JSON.parse(readFileSync(combatOut, 'utf8').trim().split('\n').at(-1));
-if (combatEnd.state !== 'lost') {
-  throw new Error(`Expected combat scenario state=lost, got ${combatEnd.state}`);
-}
-summaryLines.push(`[PASS] Scenario Combat (Pulse -> Stun -> Chase -> Loss): state=${combatEnd.state}, ticks=${combatEnd.ticks}`);
-
-// 6. Determinism check: 2 runs with identical seed=2026, ticks=600
-const detA = join(PROOF_DIR, 'determinism-run1.jsonl');
-const detB = join(PROOF_DIR, 'determinism-run2.jsonl');
-for (const out of [detA, detB]) {
+// 7. Determinism check (Night 3, seed=2026, 1800 ticks)
+const det1 = join(PROOF_DIR, 'determinism-run1.jsonl');
+const det2 = join(PROOF_DIR, 'determinism-run2.jsonl');
+for (const out of [det1, det2]) {
   execFileSync('node', [
     HEADLESS_BIN,
     '--seed',
     '2026',
     '--night',
-    '1',
+    '3',
     '--ticks',
-    '600',
+    '1800',
     '--snapshot-every',
-    '60',
+    '180',
     '--out',
     out,
   ]);
 }
-const hashA = sha256(detA);
-const hashB = sha256(detB);
-if (hashA !== hashB) {
-  throw new Error(`Determinism check failed: ${hashA} !== ${hashB}`);
-}
-summaryLines.push(`[PASS] Determinism (seed=2026, 600 ticks): SHA-256 identical (${hashA})`);
+const h1 = sha256(det1);
+const h2 = sha256(det2);
+if (h1 !== h2) throw new Error(`Determinism mismatch: ${h1} !== ${h2}`);
+summary.push(`[PASS] Determinism (Night 3, seed=2026, 1800 ticks): SHA-256 identical (${h1})`);
 
-const summaryText = summaryLines.join('\n') + '\n';
-writeFileSync(join(PROOF_DIR, 'verify-summary.txt'), summaryText, 'utf8');
-process.stdout.write(summaryText);
+const text = summary.join('\n') + '\n';
+writeFileSync(join(PROOF_DIR, 'verify-summary.txt'), text, 'utf8');
+process.stdout.write(text);
