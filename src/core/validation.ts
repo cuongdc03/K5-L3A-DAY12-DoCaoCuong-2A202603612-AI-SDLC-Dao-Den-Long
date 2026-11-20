@@ -1,4 +1,13 @@
-import type { InputFrame, InputsFile, ScenarioFile, Vec2, Vec3 } from './types';
+import type {
+  DrifterState,
+  InputFrame,
+  InputsFile,
+  MoteKind,
+  ScenarioFile,
+  ShadeState,
+  Vec2,
+  Vec3,
+} from './types';
 
 export class ContractFormatError extends Error {
   readonly exitCode = 2;
@@ -8,12 +17,26 @@ export class ContractFormatError extends Error {
   }
 }
 
+const VALID_SHADE_STATES = new Set<ShadeState>([
+  'spawning',
+  'wander',
+  'chase',
+  'recoil',
+  'stunned',
+]);
+
+const VALID_DRIFTER_STATES = new Set<DrifterState>(['idle', 'chase', 'flee', 'removed']);
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNonNegInt(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
 }
 
 function isVec3(value: unknown): value is Vec3 {
@@ -51,10 +74,10 @@ export function validateInputsFile(raw: unknown): InputsFile {
     if (!isObject(f)) {
       throw new ContractFormatError(`frames[${i}] must be an object.`);
     }
-    if (!Number.isInteger(f.tick) || (f.tick as number) < 0) {
+    if (!isNonNegInt(f.tick)) {
       throw new ContractFormatError(`frames[${i}].tick must be a non-negative integer.`);
     }
-    const tick = f.tick as number;
+    const tick = f.tick;
     if (tick <= prevTick) {
       throw new ContractFormatError(
         `frames[${i}].tick (${tick}) must be strictly greater than previous tick (${prevTick}).`,
@@ -81,7 +104,7 @@ export function validateInputsFile(raw: unknown): InputsFile {
       parsed.cam_yaw_deg = f.cam_yaw_deg;
     }
 
-    for (const key of ['jump', 'interact', 'pulse', 'dash'] as const) {
+    for (const key of ['jump', 'interact', 'pulse', 'dash', 'pause'] as const) {
       if (f[key] !== undefined) {
         if (typeof f[key] !== 'boolean') {
           throw new ContractFormatError(`frames[${i}].${key} must be a boolean.`);
@@ -114,32 +137,35 @@ export function validateScenarioFile(raw: unknown): ScenarioFile {
       }
       result.player.pos = raw.player.pos;
     }
-    if (raw.player.carried !== undefined) {
-      if (!Number.isInteger(raw.player.carried) || (raw.player.carried as number) < 0) {
-        throw new ContractFormatError('scenario.player.carried must be a non-negative integer.');
+    for (const key of [
+      'carried',
+      'flames',
+      'invuln_ticks',
+      'dash_cd_ticks',
+      'pulse_cd_ticks',
+      'charm_ticks',
+    ] as const) {
+      if (raw.player[key] !== undefined) {
+        if (!isNonNegInt(raw.player[key])) {
+          throw new ContractFormatError(`scenario.player.${key} must be a non-negative integer.`);
+        }
+        result.player[key] = raw.player[key] as number;
       }
-      result.player.carried = raw.player.carried as number;
-    }
-    if (raw.player.flames !== undefined) {
-      if (!Number.isInteger(raw.player.flames) || (raw.player.flames as number) < 0) {
-        throw new ContractFormatError('scenario.player.flames must be a non-negative integer.');
-      }
-      result.player.flames = raw.player.flames as number;
     }
   }
 
-  if (raw.random_motes !== undefined) {
-    if (typeof raw.random_motes !== 'boolean') {
-      throw new ContractFormatError('scenario.random_motes must be a boolean.');
+  for (const flag of [
+    'random_motes',
+    'random_shades',
+    'random_drifters',
+    'wind_enabled',
+  ] as const) {
+    if (raw[flag] !== undefined) {
+      if (typeof raw[flag] !== 'boolean') {
+        throw new ContractFormatError(`scenario.${flag} must be a boolean.`);
+      }
+      result[flag] = raw[flag] as boolean;
     }
-    result.random_motes = raw.random_motes;
-  }
-
-  if (raw.random_shades !== undefined) {
-    if (typeof raw.random_shades !== 'boolean') {
-      throw new ContractFormatError('scenario.random_shades must be a boolean.');
-    }
-    result.random_shades = raw.random_shades;
   }
 
   if (raw.motes !== undefined) {
@@ -154,7 +180,18 @@ export function validateScenarioFile(raw: unknown): ScenarioFile {
         if (item.id !== undefined && typeof item.id !== 'string') {
           throw new ContractFormatError(`scenario.motes[${idx}].id must be a string.`);
         }
-        return { id: item.id as string | undefined, pos: item.pos };
+        if (item.kind !== undefined && item.kind !== 'random' && item.kind !== 'dropped') {
+          throw new ContractFormatError(`scenario.motes[${idx}].kind must be "random" or "dropped".`);
+        }
+        if (item.ttl_s !== undefined && item.ttl_s !== null && (!isFiniteNumber(item.ttl_s) || item.ttl_s < 0)) {
+          throw new ContractFormatError(`scenario.motes[${idx}].ttl_s must be non-negative or null.`);
+        }
+        return {
+          id: item.id as string | undefined,
+          pos: item.pos,
+          kind: item.kind as MoteKind | undefined,
+          ttl_s: item.ttl_s as number | null | undefined,
+        };
       }
       throw new ContractFormatError(
         `scenario.motes[${idx}] must be [x, y, z] or { id?, pos: [x, y, z] }.`,
@@ -173,13 +210,75 @@ export function validateScenarioFile(raw: unknown): ScenarioFile {
       if (item.id !== undefined && typeof item.id !== 'string') {
         throw new ContractFormatError(`scenario.shades[${idx}].id must be a string.`);
       }
-      if (item.state !== undefined && item.state !== 'chase' && item.state !== 'stunned') {
-        throw new ContractFormatError(`scenario.shades[${idx}].state must be "chase" or "stunned".`);
+      if (item.state !== undefined && !VALID_SHADE_STATES.has(item.state as ShadeState)) {
+        throw new ContractFormatError(
+          `scenario.shades[${idx}].state must be one of spawning, wander, chase, recoil, stunned.`,
+        );
+      }
+      if (item.state_ticks_left !== undefined && !isNonNegInt(item.state_ticks_left)) {
+        throw new ContractFormatError(
+          `scenario.shades[${idx}].state_ticks_left must be a non-negative integer.`,
+        );
       }
       return {
         id: item.id as string | undefined,
         pos: item.pos,
-        state: item.state as 'chase' | 'stunned' | undefined,
+        state: item.state as ShadeState | undefined,
+        state_ticks_left: item.state_ticks_left as number | undefined,
+      };
+    });
+  }
+
+  if (raw.drifters !== undefined) {
+    if (!Array.isArray(raw.drifters)) {
+      throw new ContractFormatError('scenario.drifters must be an array.');
+    }
+    result.drifters = raw.drifters.map((item, idx) => {
+      if (!isObject(item) || !isVec3(item.pos)) {
+        throw new ContractFormatError(`scenario.drifters[${idx}] must be an object with pos: [x, y, z].`);
+      }
+      if (item.id !== undefined && typeof item.id !== 'string') {
+        throw new ContractFormatError(`scenario.drifters[${idx}].id must be a string.`);
+      }
+      if (item.state !== undefined && !VALID_DRIFTER_STATES.has(item.state as DrifterState)) {
+        throw new ContractFormatError(
+          `scenario.drifters[${idx}].state must be one of idle, chase, flee, removed.`,
+        );
+      }
+      if (item.stolen !== undefined && !isNonNegInt(item.stolen)) {
+        throw new ContractFormatError(`scenario.drifters[${idx}].stolen must be a non-negative integer.`);
+      }
+      return {
+        id: item.id as string | undefined,
+        pos: item.pos,
+        state: item.state as DrifterState | undefined,
+        stolen: item.stolen as number | undefined,
+      };
+    });
+  }
+
+  if (raw.charms !== undefined) {
+    if (!Array.isArray(raw.charms)) {
+      throw new ContractFormatError('scenario.charms must be an array.');
+    }
+    result.charms = raw.charms.map((item, idx) => {
+      if (!isObject(item) || !isVec3(item.pos)) {
+        throw new ContractFormatError(`scenario.charms[${idx}] must be an object with pos: [x, y, z].`);
+      }
+      if (item.id !== undefined && typeof item.id !== 'string') {
+        throw new ContractFormatError(`scenario.charms[${idx}].id must be a string.`);
+      }
+      if (item.available !== undefined && typeof item.available !== 'boolean') {
+        throw new ContractFormatError(`scenario.charms[${idx}].available must be a boolean.`);
+      }
+      if (item.respawn_s !== undefined && (!isFiniteNumber(item.respawn_s) || item.respawn_s < 0)) {
+        throw new ContractFormatError(`scenario.charms[${idx}].respawn_s must be non-negative.`);
+      }
+      return {
+        id: item.id as string | undefined,
+        pos: item.pos,
+        available: item.available as boolean | undefined,
+        respawn_s: item.respawn_s as number | undefined,
       };
     });
   }
@@ -195,7 +294,7 @@ export function validateScenarioFile(raw: unknown): ScenarioFile {
       if (item.pos !== undefined && !isVec3(item.pos)) {
         throw new ContractFormatError(`scenario.lanterns[${idx}].pos must be [x, y, z].`);
       }
-      if (item.deposited !== undefined && (!Number.isInteger(item.deposited) || (item.deposited as number) < 0)) {
+      if (item.deposited !== undefined && !isNonNegInt(item.deposited)) {
         throw new ContractFormatError(`scenario.lanterns[${idx}].deposited must be a non-negative integer.`);
       }
       if (item.lit !== undefined && typeof item.lit !== 'boolean') {

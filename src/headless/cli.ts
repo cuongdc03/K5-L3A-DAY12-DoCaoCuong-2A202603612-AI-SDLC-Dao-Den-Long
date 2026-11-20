@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { runHeadlessSimulation } from '../core/simulation';
-import type { InputFrame, ScenarioFile } from '../core/types';
+import type { InputFrame, NightId, ScenarioFile } from '../core/types';
 import {
   ContractFormatError,
   validateInputsFile,
@@ -10,7 +10,7 @@ import {
 
 interface CliArgs {
   seed: number;
-  night: number;
+  night: NightId;
   ticks: number;
   out: string;
   snapshotEvery: number;
@@ -50,9 +50,9 @@ function parseCliArgs(argv: string[]): CliArgs {
   }
 
   const seed = parseIntArg('--seed', map.get('--seed'));
-  const night = parseIntArg('--night', map.get('--night'));
-  if (night !== 1) {
-    throw new Error(`Unsupported --night value: ${night} (Phase 1 supports --night 1 only)`);
+  const nightRaw = parseIntArg('--night', map.get('--night'));
+  if (nightRaw !== 1 && nightRaw !== 2 && nightRaw !== 3) {
+    throw new Error(`Unsupported --night value: ${nightRaw} (expected 1, 2, or 3)`);
   }
 
   const ticks = parseIntArg('--ticks', map.get('--ticks'));
@@ -66,14 +66,15 @@ function parseCliArgs(argv: string[]): CliArgs {
   }
 
   const snapshotRaw = map.get('--snapshot-every');
-  const snapshotEvery = snapshotRaw !== undefined ? parseIntArg('--snapshot-every', snapshotRaw) : 10;
+  const snapshotEvery =
+    snapshotRaw !== undefined ? parseIntArg('--snapshot-every', snapshotRaw) : 10;
   if (snapshotEvery < 1) {
     throw new Error(`--snapshot-every must be >= 1 (got ${snapshotEvery})`);
   }
 
   return {
     seed,
-    night,
+    night: nightRaw,
     ticks,
     out,
     snapshotEvery,

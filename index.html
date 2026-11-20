@@ -3,212 +3,394 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Đảo Đèn Lồng — Đêm 1: Đảo Bến</title>
+  <title>Đảo Đèn Lồng — Ba Hòn Đảo</title>
   <style>
+    :root {
+      --bg-night: #0E1430;
+      --bg-fog: #1B2350;
+      --gold: #F2C14E;
+      --lantern: #FFB347;
+      --mote: #FFE58A;
+      --danger: #FF5A5F;
+      --text: #F5F1E6;
+      --charm: #C8102E;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #090716;
+      background: var(--bg-night);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: #fff8e7;
+      color: var(--text);
       user-select: none;
     }
-    #canvas-container {
-      width: 100%;
-      height: 100%;
-      position: fixed;
-      inset: 0;
-    }
+    #canvas-container { position: fixed; inset: 0; width: 100%; height: 100%; }
+
+    /* HUD */
     #hud {
       position: fixed;
-      top: 16px;
-      left: 16px;
-      right: 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
+      inset: 0;
       pointer-events: none;
       z-index: 10;
+      display: none;
     }
+    #hud.visible { display: block; }
+
     .panel {
-      background: rgba(20, 38, 48, 0.72);
-      border: 1px solid rgba(255, 224, 158, 0.42);
-      border-radius: 16px;
-      padding: 12px 16px;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 8px 28px rgba(8, 18, 28, 0.35);
+      background: rgba(14, 20, 48, 0.78);
+      border: 1px solid rgba(242, 193, 78, 0.45);
+      border-radius: 14px;
+      padding: 10px 16px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     }
-    .hud-stats {
+
+    /* Top Left: Flames + Charm */
+    #hud-tl {
+      position: absolute;
+      top: 16px;
+      left: 16px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      min-width: 220px;
     }
-    .stat-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 14px;
+    .flames-row { font-size: 22px; letter-spacing: 4px; }
+    #hud-charm-badge {
+      display: none;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      background: rgba(200, 16, 46, 0.85);
+      border: 1px solid var(--gold);
+      border-radius: 999px;
+      padding: 3px 10px;
     }
-    .stat-label { color: #cbbde2; }
-    .stat-value { font-weight: 700; color: #ffcf70; font-variant-numeric: tabular-nums; }
-    .flames { color: #ff8c42; letter-spacing: 2px; font-size: 16px; }
-    .hud-right {
+
+    /* Top Center: Timer + Night title + Wind warning */
+    #hud-tc {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      min-width: 170px;
+    }
+    #hud-night-label { font-size: 12px; color: #c7d0e8; margin-bottom: 2px; }
+    #hud-time {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    #hud-time.danger {
+      color: var(--danger);
+      animation: blink 0.8s ease-in-out infinite;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+    #hud-wind-banner {
+      display: none;
+      margin-top: 4px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #8FA3B8;
+    }
+
+    /* Top Right: Lanterns & Score */
+    #hud-tr {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      text-align: right;
+      min-width: 165px;
+    }
+    .tr-row { display: flex; justify-content: space-between; gap: 14px; font-size: 14px; }
+    .gold { color: var(--gold); font-weight: 800; font-variant-numeric: tabular-nums; }
+
+    /* Bottom Center: 10-slot Mote bar */
+    #hud-bc {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
       display: flex;
       flex-direction: column;
-      align-items: flex-end;
-      gap: 8px;
+      align-items: center;
+      gap: 6px;
     }
-    .controls-hint {
-      position: fixed;
-      bottom: 16px;
+    .mote-bar {
+      display: flex;
+      gap: 6px;
+      padding: 8px 12px;
+    }
+    .mote-slot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255, 229, 138, 0.45);
+      background: rgba(27, 35, 80, 0.65);
+      transition: transform 0.12s, background 0.12s;
+    }
+    .mote-slot.filled {
+      background: radial-gradient(circle, #FFF6C2 20%, #FFE58A 70%, #FFB347 100%);
+      border-color: #FFF6C2;
+      box-shadow: 0 0 10px rgba(255, 229, 138, 0.85);
+      transform: scale(1.08);
+    }
+
+    /* Bottom Right: Dash & Pulse Cooldowns */
+    #hud-br {
+      position: absolute;
+      bottom: 20px;
+      right: 16px;
+      display: flex;
+      gap: 10px;
+    }
+    .skill-box {
+      width: 82px;
+      text-align: center;
+      padding: 8px 6px;
+    }
+    .skill-key { font-size: 11px; color: var(--gold); font-weight: 700; }
+    .skill-name { font-size: 12px; margin: 2px 0; }
+    .skill-cd { font-size: 12px; font-weight: 700; color: var(--mote); }
+    .skill-box.cooling { opacity: 0.6; border-color: rgba(143, 163, 184, 0.4); }
+
+    /* Bottom Left: compact controls */
+    #hud-bl {
+      position: absolute;
+      bottom: 20px;
       left: 16px;
-      font-size: 12px;
+      font-size: 11px;
       line-height: 1.5;
-      color: #d7cce8;
-      pointer-events: none;
-      z-index: 10;
+      color: #d6d9e8;
     }
-    .controls-hint kbd {
-      background: rgba(255, 207, 112, 0.16);
-      border: 1px solid rgba(255, 207, 112, 0.4);
+    #hud-bl kbd {
+      background: rgba(242, 193, 78, 0.18);
+      border: 1px solid rgba(242, 193, 78, 0.45);
       border-radius: 4px;
-      padding: 1px 5px;
-      color: #ffe2a3;
-      font-weight: 600;
+      padding: 0 4px;
+      color: var(--gold);
+      font-weight: 700;
     }
+
+    /* Interact Prompt */
     #prompt-banner {
-      position: fixed;
+      position: absolute;
       bottom: 92px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 8px 18px;
+      padding: 8px 20px;
       border-radius: 999px;
-      background: rgba(255, 168, 52, 0.9);
-      color: #1a1026;
-      font-weight: 700;
+      background: rgba(255, 179, 71, 0.94);
+      color: #0E1430;
+      font-weight: 800;
       font-size: 14px;
       display: none;
-      z-index: 12;
-      box-shadow: 0 0 24px rgba(255, 168, 52, 0.6);
+      box-shadow: 0 0 22px rgba(255, 179, 71, 0.7);
     }
-    #audio-btn {
-      pointer-events: auto;
-      cursor: pointer;
-      background: rgba(14, 11, 28, 0.78);
-      color: #ffe2a3;
-      border: 1px solid rgba(255, 196, 107, 0.4);
-      border-radius: 8px;
-      padding: 6px 12px;
-      font-size: 12px;
-      font-weight: 600;
-    }
-    #audio-btn:hover { background: rgba(255, 196, 107, 0.2); }
-    #overlay {
+
+    /* Off-screen nearest unlit lantern arrow */
+    #lantern-arrow {
       position: fixed;
-      inset: 0;
-      background: rgba(8, 6, 18, 0.78);
-      backdrop-filter: blur(6px);
+      width: 34px;
+      height: 34px;
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 20;
+      color: var(--gold);
+      font-size: 24px;
+      font-weight: 900;
+      text-shadow: 0 0 12px rgba(255, 179, 71, 0.9);
+      pointer-events: none;
+      z-index: 12;
+      transform: translate(-50%, -50%);
     }
-    #overlay.visible { display: flex; }
+
+    /* Modals */
+    .screen-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(14, 20, 48, 0.82);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+    }
+    .screen-overlay.visible { display: flex; }
     .modal {
-      background: rgba(22, 16, 40, 0.94);
-      border: 1px solid rgba(255, 196, 107, 0.5);
-      border-radius: 16px;
-      padding: 28px 36px;
+      background: rgba(27, 35, 80, 0.95);
+      border: 1.5px solid rgba(242, 193, 78, 0.55);
+      border-radius: 18px;
+      padding: 28px 34px;
       text-align: center;
-      max-width: 420px;
-      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65);
+      max-width: 480px;
+      width: 90%;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65);
     }
-    .modal h1 {
-      font-size: 28px;
-      margin-bottom: 10px;
-      color: #ffd070;
-    }
-    .modal p {
-      font-size: 15px;
-      color: #ded5ed;
-      margin-bottom: 18px;
-      line-height: 1.5;
-    }
-    .modal .final-score {
-      font-size: 22px;
-      font-weight: 800;
-      color: #ffae42;
+    .modal h1 { font-size: 30px; color: var(--gold); margin-bottom: 8px; }
+    .modal h2 { font-size: 22px; color: var(--lantern); margin-bottom: 10px; }
+    .modal p { font-size: 15px; line-height: 1.55; color: var(--text); margin-bottom: 18px; }
+    .quote {
+      font-style: italic;
+      background: rgba(14, 20, 48, 0.55);
+      border-left: 3px solid var(--gold);
+      padding: 12px 14px;
+      border-radius: 8px;
+      text-align: left;
       margin-bottom: 20px;
     }
-    .btn-primary {
+    .btn-col { display: flex; flex-direction: column; gap: 10px; }
+    .btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    button {
       cursor: pointer;
-      background: linear-gradient(135deg, #ffae42, #ff7b29);
-      color: #190f24;
-      border: none;
       border-radius: 10px;
-      padding: 12px 26px;
-      font-size: 15px;
+      padding: 11px 20px;
+      font-size: 14px;
       font-weight: 700;
-      box-shadow: 0 4px 18px rgba(255, 140, 42, 0.45);
+      border: none;
+      transition: filter 0.15s, transform 0.1s;
     }
-    .btn-primary:hover { filter: brightness(1.08); }
+    button:hover { filter: brightness(1.08); }
+    button:active { transform: scale(0.98); }
+    .btn-primary {
+      background: linear-gradient(135deg, #FFB347, #F2C14E);
+      color: #0E1430;
+    }
+    .btn-secondary {
+      background: rgba(14, 20, 48, 0.85);
+      color: var(--text);
+      border: 1px solid rgba(242, 193, 78, 0.45);
+    }
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      gap: 16px;
+      text-align: left;
+    }
+    .setting-row input[type="range"] { width: 180px; accent-color: var(--gold); }
+    .score-big { font-size: 24px; font-weight: 800; color: var(--gold); margin-bottom: 16px; }
   </style>
 </head>
 <body>
   <div id="canvas-container"></div>
+  <div id="lantern-arrow">▲</div>
 
+  <!-- HUD -->
   <div id="hud">
-    <div class="panel hud-stats">
-      <div class="stat-row">
-        <span class="stat-label">Ngọn lửa (Máu)</span>
-        <span id="hud-flames" class="flames">🔥🔥🔥</span>
+    <div id="hud-tl" class="panel">
+      <div id="hud-flames" class="flames-row">🔥🔥🔥</div>
+      <div id="hud-charm-badge">Bùa Gió: 10.0s</div>
+    </div>
+
+    <div id="hud-tc" class="panel">
+      <div id="hud-night-label">Đêm 1 — Đảo Bến</div>
+      <div id="hud-time">05:00</div>
+      <div id="hud-wind-banner">Gió mạnh sắp thổi!</div>
+    </div>
+
+    <div id="hud-tr" class="panel">
+      <div class="tr-row"><span>Đèn Lồng</span><span id="hud-lanterns" class="gold">0 / 5</span></div>
+      <div class="tr-row"><span>Điểm</span><span id="hud-score" class="gold">0</span></div>
+    </div>
+
+    <div id="prompt-banner">E — Nạp ánh sáng (0/10)</div>
+
+    <div id="hud-bc">
+      <div id="mote-bar" class="panel mote-bar"></div>
+    </div>
+
+    <div id="hud-br">
+      <div id="skill-dash" class="panel skill-box">
+        <div class="skill-key">SHIFT</div>
+        <div class="skill-name">Lướt</div>
+        <div id="hud-dash-cd" class="skill-cd">Sẵn sàng</div>
       </div>
-      <div class="stat-row">
-        <span class="stat-label">Đom đóm giữ</span>
-        <span id="hud-carried" class="stat-value">0 / 5</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Đèn Lồng Lớn</span>
-        <span id="hud-lanterns" class="stat-value">0 / 5</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Tỏa sáng (Pulse)</span>
-        <span id="hud-pulse" class="stat-value">Sẵn sàng</span>
+      <div id="skill-pulse" class="panel skill-box">
+        <div class="skill-key">Q / K</div>
+        <div class="skill-name">Tỏa Sáng</div>
+        <div id="hud-pulse-cd" class="skill-cd">Cần 3</div>
       </div>
     </div>
 
-    <div class="hud-right">
-      <div class="panel hud-stats" style="min-width: 170px;">
-        <div class="stat-row">
-          <span class="stat-label">Thời gian</span>
-          <span id="hud-time" class="stat-value">03:00</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Điểm số</span>
-          <span id="hud-score" class="stat-value">0</span>
-        </div>
-      </div>
-      <button id="audio-btn" type="button">Âm thanh: Bật</button>
+    <div id="hud-bl" class="panel">
+      <div><kbd>WASD</kbd> Di chuyển · <kbd>Space</kbd> Nhảy · <kbd>Shift</kbd> Lướt</div>
+      <div><kbd>E</kbd> Nạp đèn · <kbd>Q</kbd>/<kbd>K</kbd> Tỏa Sáng · Chuột phải: Xoay cam · <kbd>Esc</kbd>/<kbd>P</kbd> Dừng</div>
     </div>
   </div>
 
-  <div id="prompt-banner">Nhấn [F] để nạp đom đóm vào Đèn Lồng</div>
-
-  <div class="panel controls-hint">
-    <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / Mũi tên: Di chuyển · <kbd>Space</kbd>: Nhảy</div>
-    <div><kbd>F</kbd>: Nạp ánh sáng vào đèn · <kbd>Shift</kbd> / <kbd>K</kbd>: Tỏa sáng xua Bóng Mực (tốn 1 đom đóm)</div>
-    <div><kbd>Q</kbd> / <kbd>E</kbd> hoặc kéo chuột phải: Xoay camera · <kbd>R</kbd>: Chơi lại</div>
-  </div>
-
-  <div id="overlay">
+  <!-- Main Menu -->
+  <div id="menu-screen" class="screen-overlay visible">
     <div class="modal">
-      <h1 id="overlay-title">Đảo Bến Đã Sáng!</h1>
-      <p id="overlay-desc">Mây đã thắp sáng toàn bộ Đèn Lồng Lớn và xua tan sương đen.</p>
-      <div id="overlay-score" class="final-score">Điểm: 0</div>
-      <button id="restart-btn" class="btn-primary" type="button">Chơi lại Đêm 1</button>
+      <h1>Đảo Đèn Lồng</h1>
+      <p>Ba hòn đảo giữa biển mây đang chìm trong sương đen. Hãy cùng Mây gom đom đóm, thắp sáng các Đèn Lồng Lớn và đón Bình Minh.</p>
+      <div class="btn-col">
+        <button id="btn-start-campaign" class="btn-primary" type="button">Bắt đầu hành trình (Đêm 1 → 3)</button>
+        <div class="btn-row">
+          <button id="btn-night-1" class="btn-secondary" type="button">Đêm 1: Đảo Bến</button>
+          <button id="btn-night-2" class="btn-secondary" type="button">Đêm 2: Đảo Cau</button>
+          <button id="btn-night-3" class="btn-secondary" type="button">Đêm 3: Đảo Chuông</button>
+        </div>
+        <button id="btn-menu-settings" class="btn-secondary" type="button">Cài đặt</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Night Intro Screen -->
+  <div id="intro-screen" class="screen-overlay">
+    <div class="modal">
+      <h2 id="intro-title">Đêm 1 — Đảo Bến</h2>
+      <p id="intro-quote" class="quote"></p>
+      <button id="btn-intro-play" class="btn-primary" type="button">Bắt đầu Đêm</button>
+    </div>
+  </div>
+
+  <!-- Pause Screen -->
+  <div id="pause-screen" class="screen-overlay">
+    <div class="modal">
+      <h2>Tạm dừng</h2>
+      <div class="btn-col">
+        <button id="btn-resume" class="btn-primary" type="button">Tiếp tục</button>
+        <button id="btn-pause-restart" class="btn-secondary" type="button">Chơi lại Đêm</button>
+        <button id="btn-pause-settings" class="btn-secondary" type="button">Cài đặt</button>
+        <button id="btn-pause-menu" class="btn-secondary" type="button">Về menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Screen -->
+  <div id="settings-screen" class="screen-overlay">
+    <div class="modal">
+      <h2>Cài đặt</h2>
+      <div class="setting-row">
+        <label for="slider-volume">Âm lượng (<span id="val-volume">70%</span>)</label>
+        <input id="slider-volume" type="range" min="0" max="100" value="70" />
+      </div>
+      <div class="setting-row">
+        <label for="slider-sens">Độ nhạy chuột (<span id="val-sens">0.35</span>)</label>
+        <input id="slider-sens" type="range" min="10" max="100" value="35" />
+      </div>
+      <button id="btn-settings-close" class="btn-primary" type="button">Lưu & Quay lại</button>
+    </div>
+  </div>
+
+  <!-- Result / Dawn Screen -->
+  <div id="result-screen" class="screen-overlay">
+    <div class="modal">
+      <h1 id="result-title">Đêm Hoàn Thành!</h1>
+      <p id="result-desc"></p>
+      <div id="result-score" class="score-big">Điểm: 0</div>
+      <div class="btn-col">
+        <button id="btn-result-next" class="btn-primary" type="button">Sang Đêm tiếp theo</button>
+        <button id="btn-result-retry" class="btn-secondary" type="button">Chơi lại Đêm</button>
+        <button id="btn-result-menu" class="btn-secondary" type="button">Về menu chính</button>
+      </div>
     </div>
   </div>
 
