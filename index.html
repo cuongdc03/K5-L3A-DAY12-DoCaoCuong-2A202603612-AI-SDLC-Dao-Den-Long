@@ -87,6 +87,12 @@
       color: var(--danger);
       animation: blink 0.8s ease-in-out infinite;
     }
+    body.colorblind #hud-time.danger {
+      color: #FFFFFF;
+    }
+    body.colorblind #hud-wind-banner {
+      color: #FFFFFF;
+    }
     @keyframes blink {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.35; }
@@ -303,6 +309,7 @@
     <div id="prompt-banner">E — Nạp ánh sáng (0/10)</div>
 
     <div id="hud-bc">
+      <div id="hud-capacity-label" style="font-size:12px;font-weight:700;color:#FFE58A;text-shadow:0 1px 4px #000;">Đom đóm: 0 / 10</div>
       <div id="mote-bar" class="panel mote-bar"></div>
     </div>
 
@@ -375,6 +382,10 @@
       <div class="setting-row">
         <label for="slider-sens">Độ nhạy chuột (<span id="val-sens">0.35</span>)</label>
         <input id="slider-sens" type="range" min="10" max="100" value="35" />
+      </div>
+      <div class="setting-row">
+        <label for="toggle-colorblind">Bảng màu dễ phân biệt (Mù màu)</label>
+        <input id="toggle-colorblind" type="checkbox" style="width:20px;height:20px;accent-color:var(--gold);" />
       </div>
       <button id="btn-settings-close" class="btn-primary" type="button">Lưu & Quay lại</button>
     </div>

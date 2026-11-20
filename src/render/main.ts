@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DT, TUNING } from '../core/config';
+import { DT, FUEL_MAX_60, LOW_FUEL_THRESHOLD_60, TICK_RATE, TUNING } from '../core/config';
 import { BELL_TOWER_RADIUS, NIGHT_MAPS } from '../core/maps';
 import { createDefaultInputState, distXZ, GameSimulation } from '../core/simulation';
 import type { EventRecord, InputState, NightId } from '../core/types';
@@ -10,6 +10,7 @@ import {
   createPainterlyGrassTexture,
   createPaperLanternTexture,
   createSkyDome,
+  createTornLanternTexture,
 } from './textures';
 
 // Standard Color Palette (TICKET-02 Part 3)
@@ -27,6 +28,7 @@ const PALETTE = {
   moteHalo: 0xffe58a,
   shadeBody: 0x120a1a,
   shadeRim: 0x7a3cff,
+  shadeRimColorblind: 0x00b3ff,
   shadeStunned: 0x3a3450,
   mayCloak: 0xe8e2d0,
   mayScarf: 0xc8102e,
@@ -36,10 +38,14 @@ const PALETTE = {
 
 interface LanternVisual {
   group: THREE.Group;
+  bulb: THREE.Mesh;
   bulbMat: THREE.MeshStandardMaterial;
   light: THREE.PointLight;
   halo: THREE.Sprite;
   safeRing: THREE.Mesh;
+  fuelBarGroup: THREE.Group;
+  fuelBarFill: THREE.Mesh;
+  fuelBarMat: THREE.MeshBasicMaterial;
 }
 
 interface ShadeVisual {
@@ -84,6 +90,7 @@ class DaoDenLongApp {
   private screenMode: ScreenMode = 'menu';
   private settingsReturnTo: ScreenMode = 'menu';
   private mouseSensitivity = 0.35;
+  private colorblindMode = false;
 
   private playerGroup!: THREE.Group;
   private playerBodyGroup!: THREE.Group;
@@ -106,6 +113,7 @@ class DaoDenLongApp {
 
   private warmGlowTex!: THREE.CanvasTexture;
   private paperLanternTex!: THREE.CanvasTexture;
+  private tornLanternTex!: THREE.CanvasTexture;
   private grassTex!: THREE.CanvasTexture;
 
   private lanternVisuals = new Map<string, LanternVisual>();
@@ -138,8 +146,10 @@ class DaoDenLongApp {
   private hudWindBanner = document.getElementById('hud-wind-banner')!;
   private hudLanterns = document.getElementById('hud-lanterns')!;
   private hudScore = document.getElementById('hud-score')!;
+  private hudCapacityLabel = document.getElementById('hud-capacity-label')!;
   private moteBar = document.getElementById('mote-bar')!;
   private moteSlots: HTMLDivElement[] = [];
+  private currentBarCapacity = 0;
   private skillDashBox = document.getElementById('skill-dash')!;
   private hudDashCd = document.getElementById('hud-dash-cd')!;
   private skillPulseBox = document.getElementById('skill-pulse')!;
@@ -163,6 +173,7 @@ class DaoDenLongApp {
   private valVolume = document.getElementById('val-volume')!;
   private sliderSens = document.getElementById('slider-sens') as HTMLInputElement;
   private valSens = document.getElementById('val-sens')!;
+  private toggleColorblind = document.getElementById('toggle-colorblind') as HTMLInputElement;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -211,6 +222,7 @@ class DaoDenLongApp {
 
     this.warmGlowTex = createGlowSpriteTexture();
     this.paperLanternTex = createPaperLanternTexture();
+    this.tornLanternTex = createTornLanternTexture();
     this.grassTex = createPainterlyGrassTexture();
 
     this.buildSkyProps();
@@ -230,16 +242,23 @@ class DaoDenLongApp {
       const s = Number.parseFloat(savedSens);
       if (Number.isFinite(s)) this.mouseSensitivity = Math.max(0.1, Math.min(1.0, s));
     }
+    const savedCb = window.localStorage.getItem('ddl_colorblind');
+    this.colorblindMode = savedCb === 'true';
+    document.body.classList.toggle('colorblind', this.colorblindMode);
+    this.toggleColorblind.checked = this.colorblindMode;
+
     this.sliderVolume.value = String(Math.round(this.sound.volume * 100));
     this.valVolume.textContent = `${this.sliderVolume.value}%`;
     this.sliderSens.value = String(Math.round(this.mouseSensitivity * 100));
     this.valSens.textContent = this.mouseSensitivity.toFixed(2);
   }
 
-  private buildMoteBar(): void {
+  private buildMoteBar(capacity = TUNING.carry_capacity): void {
+    if (this.currentBarCapacity === capacity) return;
+    this.currentBarCapacity = capacity;
     this.moteBar.innerHTML = '';
     this.moteSlots = [];
-    for (let i = 0; i < TUNING.carry_capacity; i++) {
+    for (let i = 0; i < capacity; i++) {
       const slot = document.createElement('div');
       slot.className = 'mote-slot';
       this.moteBar.appendChild(slot);
@@ -719,8 +738,35 @@ class DaoDenLongApp {
     safeRing.position.y = 0.06;
     group.add(safeRing);
 
+    // Overhead fuel bar for lit lanterns
+    const fuelBarGroup = new THREE.Group();
+    fuelBarGroup.position.set(0, 5.15, 0);
+    const barBg = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.1, 0.24),
+      new THREE.MeshBasicMaterial({ color: 0x0e1430, side: THREE.DoubleSide }),
+    );
+    const fuelBarMat = new THREE.MeshBasicMaterial({
+      color: PALETTE.gold,
+      side: THREE.DoubleSide,
+    });
+    const fuelBarFill = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.16), fuelBarMat);
+    fuelBarFill.position.z = 0.02;
+    fuelBarGroup.add(barBg, fuelBarFill);
+    fuelBarGroup.visible = false;
+    group.add(fuelBarGroup);
+
     this.entityGroup.add(group);
-    const vis: LanternVisual = { group, bulbMat, light, halo, safeRing };
+    const vis: LanternVisual = {
+      group,
+      bulb,
+      bulbMat,
+      light,
+      halo,
+      safeRing,
+      fuelBarGroup,
+      fuelBarFill,
+      fuelBarMat,
+    };
     this.lanternVisuals.set(id, vis);
     return vis;
   }
@@ -966,35 +1012,77 @@ class DaoDenLongApp {
 
     // Lanterns
     let litCount = 0;
-    let nearestInteractLantern: { deposited: number } | null = null;
+    let nearestInteractPrompt: string | null = null;
     let nearestOffscreenLantern: THREE.Vector3 | null = null;
     let nearestUnlitDist = Infinity;
+    const blink1Hz = Math.sin(this.elapsedVisual * Math.PI * 2) > 0;
 
     for (const lantern of this.sim.lanterns) {
       let vis = this.lanternVisuals.get(lantern.id);
       if (!vis) vis = this.createLanternVisual(lantern.id);
       vis.group.position.set(lantern.x, lantern.y, lantern.z);
 
+      const d = distXZ(this.sim.player.x, this.sim.player.z, lantern.x, lantern.z);
+      const inInteractRange = d <= TUNING.interact_radius && Math.abs(this.sim.player.y - lantern.y) <= 2.5;
+
       if (lantern.lit) {
         litCount++;
+        const fuelRatio = Math.max(0, Math.min(1, lantern.fuel60 / FUEL_MAX_60));
+        const isLowFuel = lantern.fuel60 < LOW_FUEL_THRESHOLD_60;
+        const flickerMult = isLowFuel && !blink1Hz ? 0.35 : 1.0;
+
+        vis.bulb.scale.set(1, 1.25, 1);
+        if (vis.bulbMat.map !== this.paperLanternTex) {
+          vis.bulbMat.map = this.paperLanternTex;
+          vis.bulbMat.needsUpdate = true;
+        }
         vis.bulbMat.color.setHex(PALETTE.lanternCore);
         vis.bulbMat.emissive.setHex(PALETTE.lanternLit);
-        vis.bulbMat.emissiveIntensity = 1.9;
-        vis.light.intensity = 22;
-        (vis.halo.material as THREE.SpriteMaterial).opacity = 0.72;
-        (vis.safeRing.material as THREE.MeshBasicMaterial).opacity = 0.28;
+        vis.bulbMat.emissiveIntensity = 1.9 * flickerMult;
+        vis.light.intensity = 22 * flickerMult;
+        (vis.halo.material as THREE.SpriteMaterial).opacity = 0.72 * flickerMult;
+        // Safe zone only active when fuel >= 30
+        (vis.safeRing.material as THREE.MeshBasicMaterial).opacity = isLowFuel ? 0 : 0.28;
+
+        // Fuel bar faces camera
+        vis.fuelBarGroup.visible = true;
+        vis.fuelBarGroup.lookAt(this.camera.position);
+        vis.fuelBarFill.scale.x = Math.max(0.01, fuelRatio);
+        vis.fuelBarFill.position.x = -(1 - fuelRatio);
+        vis.fuelBarMat.color.setHex(
+          isLowFuel
+            ? blink1Hz
+              ? this.colorblindMode
+                ? 0xffffff
+                : 0xff5a5f
+              : 0x444455
+            : PALETTE.gold,
+        );
+
+        if (inInteractRange && lantern.fuel60 < FUEL_MAX_60) {
+          nearestInteractPrompt = `E — Châm dầu (${Math.round(lantern.fuel60 / TICK_RATE)}%)`;
+        }
       } else {
-        const frac = lantern.deposited / TUNING.lantern_cost;
+        const cost = lantern.everLit ? TUNING.relight_cost : TUNING.lantern_cost;
+        const frac = lantern.deposited / cost;
+        // Unlit lantern is squashed 20% vertically + torn paper texture (no-color distinction)
+        vis.bulb.scale.set(1, 1.25 * 0.8, 1);
+        if (vis.bulbMat.map !== this.tornLanternTex) {
+          vis.bulbMat.map = this.tornLanternTex;
+          vis.bulbMat.needsUpdate = true;
+        }
         vis.bulbMat.color.setHex(PALETTE.lanternUnlit);
         vis.bulbMat.emissive.setHex(PALETTE.lanternLit);
-        vis.bulbMat.emissiveIntensity = frac * 0.9;
-        vis.light.intensity = frac * 6;
-        (vis.halo.material as THREE.SpriteMaterial).opacity = frac * 0.35;
+        vis.bulbMat.emissiveIntensity = frac * 0.8;
+        vis.light.intensity = frac * 5;
+        (vis.halo.material as THREE.SpriteMaterial).opacity = frac * 0.3;
         (vis.safeRing.material as THREE.MeshBasicMaterial).opacity = 0;
+        vis.fuelBarGroup.visible = false;
 
-        const d = distXZ(this.sim.player.x, this.sim.player.z, lantern.x, lantern.z);
-        if (d <= TUNING.interact_radius && Math.abs(this.sim.player.y - lantern.y) <= 2.5) {
-          nearestInteractLantern = lantern;
+        if (inInteractRange) {
+          nearestInteractPrompt = lantern.everLit
+            ? `E — Thắp lại (${lantern.deposited}/${cost})`
+            : `E — Nạp ánh sáng (${lantern.deposited}/${cost})`;
         }
         if (d < nearestUnlitDist) {
           nearestUnlitDist = d;
@@ -1038,14 +1126,18 @@ class DaoDenLongApp {
       vis.group.position.set(shade.x, shade.y + Math.sin(this.elapsedVisual * 4 + shade.x) * 0.12, shade.z);
       vis.group.lookAt(this.sim.player.x, shade.y + 1.0, this.sim.player.z);
 
+      const rimHex = this.colorblindMode ? PALETTE.shadeRimColorblind : PALETTE.shadeRim;
       if (shade.state === 'stunned') {
         vis.bodyMat.color.setHex(PALETTE.shadeStunned);
         vis.bodyMat.emissive.setHex(PALETTE.gold);
         vis.bodyMat.emissiveIntensity = 1.1;
+        vis.eyeMat.color.setHex(PALETTE.gold);
       } else {
         vis.bodyMat.color.setHex(PALETTE.shadeBody);
-        vis.bodyMat.emissive.setHex(PALETTE.shadeRim);
-        vis.bodyMat.emissiveIntensity = shade.state === 'spawning' ? 0.3 : 0.7;
+        vis.bodyMat.emissive.setHex(rimHex);
+        vis.bodyMat.emissiveIntensity =
+          shade.state === 'drain' ? 1.35 : shade.state === 'spawning' ? 0.3 : 0.7;
+        vis.eyeMat.color.setHex(rimHex);
       }
     }
 
@@ -1118,7 +1210,8 @@ class DaoDenLongApp {
     const totalSec = Math.ceil(this.sim.timeLeftS);
     const mm = String(Math.floor(totalSec / 60)).padStart(2, '0');
     const ss = String(totalSec % 60).padStart(2, '0');
-    this.hudTime.textContent = `${mm}:${ss}`;
+    const warnPrefix = this.colorblindMode && totalSec <= 30 ? '⚠ ' : '';
+    this.hudTime.textContent = `${warnPrefix}${mm}:${ss}`;
     this.hudTime.classList.toggle('danger', totalSec <= 30);
 
     // 10-second final countdown beep
@@ -1129,18 +1222,26 @@ class DaoDenLongApp {
 
     if (this.sim.wind.active) {
       this.hudWindBanner.style.display = 'block';
-      this.hudWindBanner.textContent = 'Gió mạnh đang thổi!';
+      this.hudWindBanner.textContent = this.colorblindMode
+        ? '⚠ Gió mạnh đang thổi!'
+        : 'Gió mạnh đang thổi!';
     } else if (this.sim.wind.warning) {
       this.hudWindBanner.style.display = 'block';
-      this.hudWindBanner.textContent = 'Cảnh báo: Gió mạnh sắp thổi!';
+      this.hudWindBanner.textContent = this.colorblindMode
+        ? '⚠ Cảnh báo: Gió mạnh sắp thổi!'
+        : 'Cảnh báo: Gió mạnh sắp thổi!';
     } else {
       this.hudWindBanner.style.display = 'none';
     }
 
-    this.hudLanterns.textContent = `${litCount} / ${this.sim.lanterns.length}`;
+    const reqLit = Math.ceil(TUNING.win_ratio * this.sim.lanterns.length);
+    this.hudLanterns.textContent = `${litCount} / ${this.sim.lanterns.length} (cần ${reqLit})`;
     this.hudScore.textContent = String(this.sim.score);
 
-    // 10-slot mote bar
+    // Dynamic capacity mote bar (10..20)
+    const cap = this.sim.getPlayerCapacity();
+    this.hudCapacityLabel.textContent = `Đom đóm: ${this.sim.player.carried} / ${cap}`;
+    this.buildMoteBar(cap);
     this.moteSlots.forEach((slot, idx) => {
       slot.classList.toggle('filled', idx < this.sim.player.carried);
     });
@@ -1165,10 +1266,10 @@ class DaoDenLongApp {
           ? `Cần ${TUNING.pulse_cost}`
           : 'Sẵn sàng';
 
-    // Interact prompt: "E — Nạp ánh sáng (x/10)"
-    if (!initial && this.sim.state === 'playing' && nearestInteractLantern) {
+    // Interact prompt
+    if (!initial && this.sim.state === 'playing' && nearestInteractPrompt) {
       this.promptBanner.style.display = 'block';
-      this.promptBanner.textContent = `E — Nạp ánh sáng (${nearestInteractLantern.deposited}/${TUNING.lantern_cost})`;
+      this.promptBanner.textContent = nearestInteractPrompt;
     } else {
       this.promptBanner.style.display = 'none';
     }
@@ -1386,6 +1487,11 @@ class DaoDenLongApp {
       this.mouseSensitivity = val;
       this.valSens.textContent = val.toFixed(2);
       window.localStorage.setItem('ddl_sensitivity', String(val));
+    });
+    this.toggleColorblind.addEventListener('change', () => {
+      this.colorblindMode = this.toggleColorblind.checked;
+      document.body.classList.toggle('colorblind', this.colorblindMode);
+      window.localStorage.setItem('ddl_colorblind', String(this.colorblindMode));
     });
 
     this.btnResultNext.addEventListener('click', () => {

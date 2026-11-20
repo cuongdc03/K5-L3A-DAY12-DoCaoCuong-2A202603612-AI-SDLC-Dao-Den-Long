@@ -1,8 +1,8 @@
-# Đảo Đèn Lồng — Day 12 AI SDLC (Ba Hòn Đảo · Contract v1.1)
+# Đảo Đèn Lồng — Day 12 AI SDLC (Ba Hòn Đảo · Contract v1.2)
 
 > **Video demo:** *(Sẽ cập nhật link Release `v1.0.0` ở Phase 4)*
 
-Game 3D góc nhìn thứ ba xây dựng bằng **TypeScript + Vite + Three.js** (giao diện 3D) và **Node.js** (chế độ headless thuần logic 60 tick/giây tuân thủ **Test Contract v1.1**). Trải qua **3 Đêm** (*Đảo Bến*, *Đảo Cau*, *Đảo Chuông*), người chơi điều khiển **Mây** gom đom đóm, thắp sáng các Đèn Lồng Lớn, lướt vượt biển mây, né **Bóng Mực** và **Gió Lạc** để đón Bình Minh.
+Game 3D góc nhìn thứ ba xây dựng bằng **TypeScript + Vite + Three.js** (giao diện 3D) và **Node.js** (chế độ headless thuần logic 60 tick/giây tuân thủ **Test Contract v1.2**). Trải qua **3 Đêm** (*Đảo Bến*, *Đảo Cau*, *Đảo Chuông*), người chơi điều khiển **Mây** gom đom đóm, thắp & châm dầu giữ các Đèn Lồng Lớn sáng tới **Bình Minh** (`≥ 60%` số đèn), ngăn **Bóng Mực** hút dầu và **Gió Lạc** cướp đom đóm.
 
 ---
 
@@ -34,15 +34,16 @@ Mở trình duyệt tại địa chỉ Vite hiển thị (mặc định `http://
 
 ---
 
-## Cách tính điểm & Thông số chuẩn (`game.contract.json` v1.1)
+## Cách tính điểm & Thông số chuẩn (`game.contract.json` v1.2)
 
 Toàn bộ thông số gameplay đọc trực tiếp từ [`game.contract.json`](game.contract.json):
 
-- **Nạp 1 đom đóm vào Đèn Lồng:** `+10` điểm (`per_mote`)
-- **Thắp sáng 1 Đèn Lồng Lớn** (đủ `10` đom đóm): `+100` điểm (`per_lantern`)
-- **Tỏa Sáng trúng 1 Bóng Mực:** `+5` điểm (`per_stun`, mỗi con mỗi lần)
-- **Thưởng thắng mỗi Đêm:** `floor(time_left_s) * 2` (`per_second_left`) + `flames * 50` (`per_flame_left`)
-- **Tổng điểm hành trình:** Tổng điểm các Đêm đã thắng (Đêm 1 → Đêm 2 → Đêm 3).
+- **Nạp / châm dầu 1 đom đóm vào Đèn Lồng:** `+5` điểm (`per_mote`)
+- **Thắp sáng lần đầu** (`10` đom đóm): `+100` điểm (`per_lantern`) · **Thắp lại** (`5` đom đóm): `+40` điểm
+- **Tỏa Sáng trúng 1 Bóng Mực:** `+5` điểm (`+15` nếu ngay trước đó nó đang hút dầu `drain`)
+- **Bình Minh (thắng khi sống sót hết giờ với `≥ 60%` đèn sáng — `3/5`, `4/6`, `5/7`):** mỗi đèn đang sáng `+(50 + floor(fuel))` + mỗi Ngọn Lửa còn lại `+50` (bỏ thưởng thời gian)
+- **Sức chứa tăng dần:** `min(20, 10 + 2 × successful_lights)` mỗi Đêm
+- **Chế độ mù màu:** Bật **"Bảng màu dễ phân biệt"** trong Cài đặt (`#00B3FF` cho Bóng Mực, `#FFFFFF` + `⚠` cho cảnh báo, đèn tắt xẹp 20% + giấy rách, thanh dầu & đèn yếu nhấp nháy `1 Hz`).
 
 ---
 

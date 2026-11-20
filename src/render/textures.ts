@@ -114,6 +114,53 @@ export function createPaperLanternTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+/**
+ * Torn unlit paper lantern texture (distinguishable without color for colorblind accessibility).
+ */
+export function createTornLanternTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#5B5F6E';
+  ctx.fillRect(0, 0, size, size);
+
+  // Horizontal pleats
+  ctx.strokeStyle = '#3f4350';
+  ctx.lineWidth = 2;
+  for (let y = 18; y < size; y += 22) {
+    ctx.globalAlpha = 0.45;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(size, y);
+    ctx.stroke();
+  }
+
+  // Jagged tear marks on unlit paper
+  ctx.globalAlpha = 0.9;
+  ctx.strokeStyle = '#141722';
+  ctx.lineWidth = 4;
+  const tears: Array<Array<[number, number]>> = [
+    [[48, 52], [62, 88], [50, 128], [72, 168]],
+    [[145, 70], [165, 110], [150, 148], [176, 190]],
+    [[208, 44], [198, 92], [216, 134]],
+  ];
+  for (const path of tears) {
+    ctx.beginPath();
+    ctx.moveTo(path[0][0], path[0][1]);
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(path[i][0], path[i][1]);
+    }
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export function createGlowSpriteTexture(
   innerColor = 'rgba(255, 246, 194, 1)',
   midColor = 'rgba(255, 229, 138, 0.55)',

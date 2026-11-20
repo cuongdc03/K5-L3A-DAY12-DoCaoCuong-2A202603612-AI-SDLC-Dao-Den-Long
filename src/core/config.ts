@@ -8,8 +8,20 @@ export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
 export const DIST_EPS = 1e-9;
 
-// Standard Physics & Movement Constants (TICKET-02 Part 1)
-export const ACCEL_TIME_S = 0.08; // <= 0.1s ramp up / stop
+// Integer Fuel Units (1 unit = 1/60 fuel)
+export const FUEL_MAX_60 = Math.round(TUNING.fuel_max * TICK_RATE); // 6000
+export const FUEL_DECAY_PER_TICK_60 = Math.round(TUNING.fuel_decay_per_s); // 1
+export const FUEL_DRAIN_PER_TICK_60 = Math.round(TUNING.drain_per_s); // 5
+export const FUEL_PER_MOTE_60 = Math.round(TUNING.fuel_per_mote * TICK_RATE); // 600
+export const LOW_FUEL_THRESHOLD_60 = Math.round(TUNING.low_fuel_threshold * TICK_RATE); // 1800
+export const SHADE_DRAIN_RADIUS = 2.0;
+export const SHADE_DRAIN_PLAYER_AGGRO_RADIUS = 6.0;
+export const SCORE_RELIGHT = 40;
+export const SCORE_STUN_DRAINING = 15;
+export const SCORE_DAWN_LANTERN_BASE = 50;
+
+// Standard Physics & Movement Constants
+export const ACCEL_TIME_S = 0.08;
 export const JUMP_VELOCITY = 7.0;
 export const GRAVITY = 20.0;
 export const DASH_TICKS = Math.round(TUNING.dash_duration_s * TICK_RATE); // 12
@@ -64,7 +76,7 @@ export const CHARM_SPEED = 7.2;
 export const CHARM_RESPAWN_TICKS = 2700;
 
 // Night 3 Strong Wind
-export const WIND_INTERVAL_TICKS = 1800; // every 30s
-export const WIND_DURATION_TICKS = 300; // 5s
-export const WIND_WARNING_TICKS = 120; // 2s warning before wind
+export const WIND_INTERVAL_TICKS = 1800;
+export const WIND_DURATION_TICKS = 300;
+export const WIND_WARNING_TICKS = 120;
 export const WIND_PUSH_SPEED = 2.0;
