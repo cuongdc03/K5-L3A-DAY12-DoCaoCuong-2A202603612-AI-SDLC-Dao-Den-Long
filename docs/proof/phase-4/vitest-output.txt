@@ -1,0 +1,15 @@
+
+> dao-den-long@1.0.0 test
+> vitest run
+
+
+ RUN  v3.2.7 /Users/cuong/workspaces/ai-in-action/K5-L3A-LAB-Day12-AI-SDLC
+
+ ✓ tests/core.test.ts (10 tests) 10ms
+ ✓ tests/headless.test.ts (3 tests) 383ms
+
+ Test Files  2 passed (2)
+      Tests  13 passed (13)
+   Start at  16:42:45
+   Duration  743ms (transform 176ms, setup 0ms, collect 170ms, tests 392ms, environment 0ms, prepare 265ms)
+

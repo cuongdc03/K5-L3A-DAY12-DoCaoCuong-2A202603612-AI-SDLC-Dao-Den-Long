@@ -1,0 +1,10 @@
+=== Phase 4 Verification Summary (Contract v1.3 · v1.0.0) ===
+Timestamp: 2026-11-20T09:42:43.123Z
+Node: v22.23.0
+[PASS] TypeScript typecheck (tsc --noEmit)
+[PASS] Build (dist/headless.mjs + dist/soak.mjs + dist/web/)
+[PASS] Vitest unit, regression & Contract v1.0-v1.3 suite
+[PASS] Soak Test (10 nights): crashes=0, mem=41.5->45.9MB (1.11x <= 1.2x), duration=0.3s
+[PASS] Leaderboard CLI export: valid JSON with 0 entries
+[PASS] Determinism (Night 3, seed=2026, 1800 ticks): SHA-256 identical (d5d9b1c1f5c0765d95fbe2b5a0f623c14dd277dfcd6299ccbeb2381d0c5eedeb)
+[INFO] bench.json present: avg_fps=624.1, p1_low_fps=232.6, frame_ms_p95=3.4, load_ms=1843
