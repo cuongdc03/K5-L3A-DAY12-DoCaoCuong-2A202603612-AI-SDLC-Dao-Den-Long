@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Đảo Đèn Lồng — Đêm 1: Đảo Bến</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #090716;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #fff8e7;
+      user-select: none;
+    }
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      position: fixed;
+      inset: 0;
+    }
+    #hud {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .panel {
+      background: rgba(20, 38, 48, 0.72);
+      border: 1px solid rgba(255, 224, 158, 0.42);
+      border-radius: 16px;
+      padding: 12px 16px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 28px rgba(8, 18, 28, 0.35);
+    }
+    .hud-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 220px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+    .stat-label { color: #cbbde2; }
+    .stat-value { font-weight: 700; color: #ffcf70; font-variant-numeric: tabular-nums; }
+    .flames { color: #ff8c42; letter-spacing: 2px; font-size: 16px; }
+    .hud-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    .controls-hint {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #d7cce8;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .controls-hint kbd {
+      background: rgba(255, 207, 112, 0.16);
+      border: 1px solid rgba(255, 207, 112, 0.4);
+      border-radius: 4px;
+      padding: 1px 5px;
+      color: #ffe2a3;
+      font-weight: 600;
+    }
+    #prompt-banner {
+      position: fixed;
+      bottom: 92px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 18px;
+      border-radius: 999px;
+      background: rgba(255, 168, 52, 0.9);
+      color: #1a1026;
+      font-weight: 700;
+      font-size: 14px;
+      display: none;
+      z-index: 12;
+      box-shadow: 0 0 24px rgba(255, 168, 52, 0.6);
+    }
+    #audio-btn {
+      pointer-events: auto;
+      cursor: pointer;
+      background: rgba(14, 11, 28, 0.78);
+      color: #ffe2a3;
+      border: 1px solid rgba(255, 196, 107, 0.4);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #audio-btn:hover { background: rgba(255, 196, 107, 0.2); }
+    #overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 6, 18, 0.78);
+      backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+    #overlay.visible { display: flex; }
+    .modal {
+      background: rgba(22, 16, 40, 0.94);
+      border: 1px solid rgba(255, 196, 107, 0.5);
+      border-radius: 16px;
+      padding: 28px 36px;
+      text-align: center;
+      max-width: 420px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65);
+    }
+    .modal h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+      color: #ffd070;
+    }
+    .modal p {
+      font-size: 15px;
+      color: #ded5ed;
+      margin-bottom: 18px;
+      line-height: 1.5;
+    }
+    .modal .final-score {
+      font-size: 22px;
+      font-weight: 800;
+      color: #ffae42;
+      margin-bottom: 20px;
+    }
+    .btn-primary {
+      cursor: pointer;
+      background: linear-gradient(135deg, #ffae42, #ff7b29);
+      color: #190f24;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 26px;
+      font-size: 15px;
+      font-weight: 700;
+      box-shadow: 0 4px 18px rgba(255, 140, 42, 0.45);
+    }
+    .btn-primary:hover { filter: brightness(1.08); }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <div id="hud">
+    <div class="panel hud-stats">
+      <div class="stat-row">
+        <span class="stat-label">Ngọn lửa (Máu)</span>
+        <span id="hud-flames" class="flames">🔥🔥🔥</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Đom đóm giữ</span>
+        <span id="hud-carried" class="stat-value">0 / 5</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Đèn Lồng Lớn</span>
+        <span id="hud-lanterns" class="stat-value">0 / 5</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Tỏa sáng (Pulse)</span>
+        <span id="hud-pulse" class="stat-value">Sẵn sàng</span>
+      </div>
+    </div>
+
+    <div class="hud-right">
+      <div class="panel hud-stats" style="min-width: 170px;">
+        <div class="stat-row">
+          <span class="stat-label">Thời gian</span>
+          <span id="hud-time" class="stat-value">03:00</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Điểm số</span>
+          <span id="hud-score" class="stat-value">0</span>
+        </div>
+      </div>
+      <button id="audio-btn" type="button">Âm thanh: Bật</button>
+    </div>
+  </div>
+
+  <div id="prompt-banner">Nhấn [F] để nạp đom đóm vào Đèn Lồng</div>
+
+  <div class="panel controls-hint">
+    <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / Mũi tên: Di chuyển · <kbd>Space</kbd>: Nhảy</div>
+    <div><kbd>F</kbd>: Nạp ánh sáng vào đèn · <kbd>Shift</kbd> / <kbd>K</kbd>: Tỏa sáng xua Bóng Mực (tốn 1 đom đóm)</div>
+    <div><kbd>Q</kbd> / <kbd>E</kbd> hoặc kéo chuột phải: Xoay camera · <kbd>R</kbd>: Chơi lại</div>
+  </div>
+
+  <div id="overlay">
+    <div class="modal">
+      <h1 id="overlay-title">Đảo Bến Đã Sáng!</h1>
+      <p id="overlay-desc">Mây đã thắp sáng toàn bộ Đèn Lồng Lớn và xua tan sương đen.</p>
+      <div id="overlay-score" class="final-score">Điểm: 0</div>
+      <button id="restart-btn" class="btn-primary" type="button">Chơi lại Đêm 1</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/render/main.ts"></script>
+</body>
+</html>
