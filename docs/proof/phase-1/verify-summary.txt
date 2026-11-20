@@ -1,0 +1,9 @@
+=== Phase 1 Verification Summary ===
+Timestamp: 2026-11-20T07:56:38.843Z
+Node: v22.23.0
+[PASS] TypeScript typecheck (tsc --noEmit)
+[PASS] Build (dist/headless.mjs + dist/web/)
+[PASS] Vitest unit & headless contract suite (see vitest-output.txt)
+[PASS] Scenario Win: state=won, ticks=86, score=496
+[PASS] Scenario Combat (Pulse -> Stun -> Chase -> Loss): state=lost, ticks=269
+[PASS] Determinism (seed=2026, 600 ticks): SHA-256 identical (e23c004256fdcb53893142fb860f75147000fbb1bf0accdc47948e836df761d1)
