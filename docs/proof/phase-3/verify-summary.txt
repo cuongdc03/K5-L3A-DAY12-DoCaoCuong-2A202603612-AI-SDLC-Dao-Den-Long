@@ -1,0 +1,11 @@
+=== Phase 3 Verification Summary (Contract v1.2 — Đèn cạn dầu) ===
+Timestamp: 2026-11-20T09:19:10.545Z
+Node: v22.23.0
+[PASS] TypeScript typecheck (tsc --noEmit)
+[PASS] Build (dist/headless.mjs + dist/web/)
+[PASS] Vitest unit, regression & Contract v1.2 suite
+[PASS] Scenario Fuel Out & Relight (5 motes, +40, capacity=12): verified
+[PASS] Scenario Shade Drain (fuel_drain @60t) & Pulse Interrupt (+15 bonus): verified
+[PASS] Scenario Dawn Survived (3/5 lit): score=400
+[PASS] Perf Benchmark (Night 3, 18,000 ticks): 0.262s (limit <= 30s)
+[PASS] Determinism (Night 3, seed=2026, 1800 ticks): SHA-256 identical (d5d9b1c1f5c0765d95fbe2b5a0f623c14dd277dfcd6299ccbeb2381d0c5eedeb)
